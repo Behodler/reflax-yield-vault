@@ -44,4 +44,14 @@ interface IVault {
      * @dev This function should be restricted to the contract owner
      */
     function emergencyWithdraw(uint256 amount) external;
+
+    /**
+     * @notice Two-phase total withdrawal function for emergency fund migration
+     * @param token The token address to withdraw from
+     * @param client The client address whose tokens to withdraw
+     * @dev Phase 1: Initiates 24-hour waiting period. Phase 2: Executes withdrawal within 48-hour window.
+     *      This provides community protection against rugpulls while allowing legitimate fund migrations.
+     *      Only the contract owner can initiate this process.
+     */
+    function totalWithdrawal(address token, address client) external;
 }

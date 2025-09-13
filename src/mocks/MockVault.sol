@@ -86,6 +86,27 @@ contract MockVault is Vault {
         // Implementation would depend on specific token emergency withdrawal requirements
     }
 
+    /**
+     * @notice Internal total withdraw implementation for emergency fund migration
+     * @param token The token address to withdraw
+     * @param client The client address whose tokens to withdraw
+     * @param amount The amount to withdraw
+     * @dev Transfers the client's entire token balance to the owner (emergency migration)
+     */
+    function _totalWithdraw(address token, address client, uint256 amount) internal override {
+        require(token != address(0), "MockVault: token is zero address");
+        require(client != address(0), "MockVault: client is zero address");
+        require(amount > 0, "MockVault: amount is zero");
+        require(balances[token][client] >= amount, "MockVault: insufficient balance for total withdrawal");
+
+        // Update internal accounting - remove balance from client
+        balances[token][client] -= amount;
+        totalDeposits[token] -= amount;
+
+        // Transfer tokens from vault to owner (emergency migration)
+        IERC20(token).transfer(owner(), amount);
+    }
+
     // Additional helper functions for testing
     function getTotalDeposits(address token) external view returns (uint256) {
         return totalDeposits[token];
