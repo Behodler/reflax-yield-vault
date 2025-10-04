@@ -16,10 +16,11 @@ interface IMainRewarder {
 
     /**
      * @notice Unstake vault shares and stop earning TOKE rewards
-     * @param user The address of the user unstaking
+     * @param account The address of the account unstaking
      * @param amount The amount of vault shares to unstake
+     * @param claim Whether to claim pending rewards during withdrawal
      */
-    function withdraw(address user, uint256 amount) external;
+    function withdraw(address account, uint256 amount, bool claim) external;
 
     /**
      * @notice Get the reward earned by a user
@@ -30,10 +31,12 @@ interface IMainRewarder {
 
     /**
      * @notice Claim all earned TOKE rewards
-     * @param user The address of the user claiming rewards
-     * @return The amount of TOKE tokens claimed
+     * @param account The address of the account claiming rewards
+     * @param recipient The address that will receive the claimed rewards
+     * @param claimExtras Whether to claim extra rewards from linked contracts
+     * @return success True if the reward claim was successful
      */
-    function getReward(address user) external returns (uint256);
+    function getReward(address account, address recipient, bool claimExtras) external returns (bool success);
 
     /**
      * @notice Get the staked balance of a user
