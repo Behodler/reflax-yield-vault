@@ -9,10 +9,10 @@ pragma solidity ^0.8.13;
 interface IMainRewarder {
     /**
      * @notice Stake vault shares to earn TOKE rewards
-     * @param user The address of the user staking
+     * @param account The address of the account staking
      * @param amount The amount of vault shares to stake
      */
-    function stake(address user, uint256 amount) external;
+    function stake(address account, uint256 amount) external;
 
     /**
      * @notice Unstake vault shares and stop earning TOKE rewards
@@ -24,10 +24,10 @@ interface IMainRewarder {
 
     /**
      * @notice Get the reward earned by a user
-     * @param user The address of the user
+     * @param account The address of the account
      * @return The amount of TOKE rewards earned
      */
-    function earned(address user) external view returns (uint256);
+    function earned(address account) external view returns (uint256);
 
     /**
      * @notice Claim all earned TOKE rewards
@@ -40,10 +40,10 @@ interface IMainRewarder {
 
     /**
      * @notice Get the staked balance of a user
-     * @param user The address of the user
-     * @return The amount of shares staked by the user
+     * @param account The address of the account
+     * @return The amount of shares staked by the account
      */
-    function balanceOf(address user) external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
 
     /**
      * @notice Get the total supply of staked shares
