@@ -231,7 +231,7 @@ contract AutoDolaVault is Vault {
         require(sharesToWithdraw > 0, "AutoDolaVault: no shares to withdraw");
 
         // Unstake from MainRewarder first
-        mainRewarder.withdraw(address(this), sharesToWithdraw);
+        mainRewarder.withdraw(address(this), sharesToWithdraw, false);
 
         // Withdraw from autoDOLA vault
         uint256 dolaBefore = dolaToken.balanceOf(address(this));
@@ -262,10 +262,11 @@ contract AutoDolaVault is Vault {
         require(recipient != address(0), "AutoDolaVault: recipient cannot be zero address");
 
         uint256 rewardsBefore = tokeToken.balanceOf(address(this));
-        uint256 rewardsEarned = mainRewarder.getReward(address(this));
+        bool success = mainRewarder.getReward(address(this), address(this), true);
         uint256 rewardsAfter = tokeToken.balanceOf(address(this));
 
-        require(rewardsAfter == rewardsBefore + rewardsEarned, "AutoDolaVault: TOKE reward mismatch");
+        require(success, "AutoDolaVault: TOKE reward claim failed");
+        uint256 rewardsEarned = rewardsAfter - rewardsBefore;
 
         if (rewardsEarned > 0) {
             tokeToken.safeTransfer(recipient, rewardsEarned);
@@ -296,7 +297,7 @@ contract AutoDolaVault is Vault {
         uint256 stakedShares = mainRewarder.balanceOf(address(this));
         if (stakedShares > 0) {
             uint256 toUnstake = sharesToWithdraw > stakedShares ? stakedShares : sharesToWithdraw;
-            mainRewarder.withdraw(address(this), toUnstake);
+            mainRewarder.withdraw(address(this), toUnstake, false);
         }
 
         // Redeem from autoDOLA vault
@@ -331,7 +332,7 @@ contract AutoDolaVault is Vault {
             uint256 stakedShares = mainRewarder.balanceOf(address(this));
             if (stakedShares > 0) {
                 uint256 toUnstake = sharesToWithdraw > stakedShares ? stakedShares : sharesToWithdraw;
-                mainRewarder.withdraw(address(this), toUnstake);
+                mainRewarder.withdraw(address(this), toUnstake, false);
             }
 
             // Redeem from autoDOLA vault
