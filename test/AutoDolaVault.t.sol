@@ -83,23 +83,31 @@ contract MockMainRewarder {
         _totalSupply += amount;
     }
 
-    function withdraw(address user, uint256 amount) external {
+    function withdraw(address user, uint256 amount, bool claim) external {
         require(_balances[user] >= amount, "Insufficient staked balance");
         _balances[user] -= amount;
         _totalSupply -= amount;
+
+        // If claim is true, also claim pending rewards
+        if (claim && _rewards[user] > 0) {
+            uint256 reward = _rewards[user];
+            _rewards[user] = 0;
+            MockERC20(_rewardToken).transfer(user, reward);
+        }
     }
 
     function earned(address user) external view returns (uint256) {
         return _rewards[user];
     }
 
-    function getReward(address user) external returns (uint256) {
-        uint256 reward = _rewards[user];
-        _rewards[user] = 0;
+    function getReward(address account, address recipient, bool claimExtras) external returns (bool) {
+        uint256 reward = _rewards[account];
+        _rewards[account] = 0;
         if (reward > 0) {
-            MockERC20(_rewardToken).transfer(user, reward);
+            MockERC20(_rewardToken).transfer(recipient, reward);
         }
-        return reward;
+        // claimExtras is a parameter for future extensibility, currently just a placeholder
+        return true;
     }
 
     function balanceOf(address user) external view returns (uint256) {
@@ -439,5 +447,109 @@ contract AutoDolaVaultTest is Test {
         // Verify balance query rejects non-DOLA tokens
         vm.expectRevert("AutoDolaVault: only DOLA token supported");
         vault.balanceOf(address(otherToken), user1);
+    }
+
+    function testWithdrawWithClaim() public {
+        uint256 depositAmount = 1000e18;
+        uint256 withdrawAmount = 500e18;
+        uint256 rewardAmount = 50e18;
+
+        // First deposit
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, client1);
+
+        // Simulate earning TOKE rewards
+        mainRewarder.simulateRewards(address(vault), rewardAmount);
+
+        // Verify rewards are available
+        assertEq(vault.getTokeRewards(), rewardAmount);
+
+        // Get initial TOKE balance of vault
+        uint256 initialVaultToke = tokeToken.balanceOf(address(vault));
+
+        // Perform withdrawal with claim=true (this happens inside AutoDolaVault.withdraw)
+        // Note: The actual claim happens when mainRewarder.withdraw is called with claim=true
+        // For this test, we need to verify the mock behavior works correctly
+        vm.prank(client1);
+        vault.withdraw(address(dolaToken), withdrawAmount, user2);
+
+        // Note: AutoDolaVault currently calls withdraw with claim=false
+        // This test verifies the mock implementation works correctly when claim=true
+        // We'll test the mock directly
+        uint256 stakeAmount = 100e18;
+        mainRewarder.stake(user1, stakeAmount);
+        mainRewarder.simulateRewards(user1, rewardAmount);
+
+        uint256 userTokeBalanceBefore = tokeToken.balanceOf(user1);
+        mainRewarder.withdraw(user1, stakeAmount, true);
+        uint256 userTokeBalanceAfter = tokeToken.balanceOf(user1);
+
+        // Verify rewards were claimed during withdrawal
+        assertEq(userTokeBalanceAfter, userTokeBalanceBefore + rewardAmount);
+        assertEq(mainRewarder.earned(user1), 0);
+    }
+
+    function testGetRewardWithRecipient() public {
+        uint256 depositAmount = 1000e18;
+        uint256 rewardAmount = 50e18;
+
+        // Deposit to enable staking
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, user1);
+
+        // Simulate earning TOKE rewards for the vault
+        mainRewarder.simulateRewards(address(vault), rewardAmount);
+
+        // Verify rewards are available
+        assertEq(vault.getTokeRewards(), rewardAmount);
+
+        // Test the mock directly to verify recipient parameter works
+        mainRewarder.simulateRewards(user1, rewardAmount);
+
+        uint256 user2TokeBalanceBefore = tokeToken.balanceOf(user2);
+        mainRewarder.getReward(user1, user2, false);
+        uint256 user2TokeBalanceAfter = tokeToken.balanceOf(user2);
+
+        // Verify rewards were sent to user2 (not user1)
+        assertEq(user2TokeBalanceAfter, user2TokeBalanceBefore + rewardAmount);
+        assertEq(mainRewarder.earned(user1), 0);
+        assertEq(tokeToken.balanceOf(user1), 0);
+    }
+
+    function testGetRewardWithClaimExtras() public {
+        uint256 depositAmount = 1000e18;
+        uint256 rewardAmount = 50e18;
+
+        // Deposit to enable staking
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, user1);
+
+        // Simulate earning TOKE rewards
+        mainRewarder.simulateRewards(address(vault), rewardAmount);
+
+        // Test with claimExtras=true (currently just a placeholder in mock)
+        uint256 initialTokeBalance = tokeToken.balanceOf(address(vault));
+        bool success = mainRewarder.getReward(address(vault), address(vault), true);
+        uint256 finalTokeBalance = tokeToken.balanceOf(address(vault));
+
+        // Verify the call succeeded
+        assertTrue(success);
+        assertEq(finalTokeBalance, initialTokeBalance + rewardAmount);
+
+        // Test with claimExtras=false
+        mainRewarder.simulateRewards(address(vault), rewardAmount);
+        initialTokeBalance = tokeToken.balanceOf(address(vault));
+        success = mainRewarder.getReward(address(vault), address(vault), false);
+        finalTokeBalance = tokeToken.balanceOf(address(vault));
+
+        // Verify the call succeeded with claimExtras=false as well
+        assertTrue(success);
+        assertEq(finalTokeBalance, initialTokeBalance + rewardAmount);
     }
 }
