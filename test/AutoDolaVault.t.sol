@@ -552,4 +552,222 @@ contract AutoDolaVaultTest is Test {
         assertTrue(success);
         assertEq(finalTokeBalance, initialTokeBalance + rewardAmount);
     }
+
+    // ============ _totalWithdraw Unit Tests ============
+
+    /**
+     * @notice Test that _totalWithdraw correctly calculates shares to withdraw
+     * @dev Verifies the calculation at line 328: sharesToWithdraw = (totalShares * clientStoredBalance) / totalDeposited[token]
+     */
+    function testTotalWithdrawCalculatesCorrectShares() public {
+        uint256 deposit1 = 1000e18; // Client 1 deposits 1000 DOLA
+        uint256 deposit2 = 3000e18; // Client 2 deposits 3000 DOLA (total = 4000 DOLA)
+
+        // Client 1 deposits for user1
+        vm.prank(client1);
+        dolaToken.approve(address(vault), deposit1);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), deposit1, user1);
+
+        // Client 2 deposits for user2
+        vm.prank(client2);
+        dolaToken.approve(address(vault), deposit2);
+        vm.prank(client2);
+        vault.deposit(address(dolaToken), deposit2, user2);
+
+        // Get total shares and verify client 1 should get 25% of shares
+        uint256 totalSharesBefore = autoDolaVault.balanceOf(address(vault));
+        uint256 expectedSharesForUser1 = (totalSharesBefore * deposit1) / (deposit1 + deposit2);
+
+        // Initiate total withdrawal for user1
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Advance time past waiting period (24 hours)
+        vm.warp(block.timestamp + 24 hours + 1);
+
+        // Get owner's initial DOLA balance
+        uint256 ownerDolaBalanceBefore = dolaToken.balanceOf(owner);
+
+        // Execute total withdrawal
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Verify correct amount of shares were withdrawn
+        uint256 totalSharesAfter = autoDolaVault.balanceOf(address(vault));
+        uint256 sharesWithdrawn = totalSharesBefore - totalSharesAfter;
+
+        // Allow for small rounding errors (within 0.1%)
+        uint256 tolerance = expectedSharesForUser1 / 1000;
+        assertTrue(
+            sharesWithdrawn >= expectedSharesForUser1 - tolerance &&
+            sharesWithdrawn <= expectedSharesForUser1 + tolerance,
+            "Share calculation should be accurate"
+        );
+
+        // Verify owner received approximately the right amount of DOLA
+        uint256 ownerDolaBalanceAfter = dolaToken.balanceOf(owner);
+        uint256 dolaReceived = ownerDolaBalanceAfter - ownerDolaBalanceBefore;
+        assertTrue(dolaReceived >= deposit1 - tolerance && dolaReceived <= deposit1 + tolerance);
+    }
+
+    /**
+     * @notice Test _totalWithdraw with partial unstaking scenario
+     * @dev Verifies behavior when stakedShares > sharesToWithdraw (line 334)
+     */
+    function testTotalWithdrawPartialUnstake() public {
+        uint256 deposit1 = 1000e18;
+        uint256 deposit2 = 9000e18; // Much larger deposit to ensure partial unstaking
+
+        // Client 1 deposits for user1
+        vm.prank(client1);
+        dolaToken.approve(address(vault), deposit1);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), deposit1, user1);
+
+        // Client 2 deposits for user2
+        vm.prank(client2);
+        dolaToken.approve(address(vault), deposit2);
+        vm.prank(client2);
+        vault.deposit(address(dolaToken), deposit2, user2);
+
+        // Verify all shares are staked
+        uint256 totalShares = autoDolaVault.balanceOf(address(vault));
+        uint256 stakedShares = mainRewarder.balanceOf(address(vault));
+        assertEq(totalShares, stakedShares, "All shares should be staked");
+
+        // Initiate total withdrawal for user1 (small portion)
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Advance time past waiting period
+        vm.warp(block.timestamp + 24 hours + 1);
+
+        uint256 stakedSharesBefore = mainRewarder.balanceOf(address(vault));
+
+        // Execute total withdrawal
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Verify partial unstaking occurred
+        uint256 stakedSharesAfter = mainRewarder.balanceOf(address(vault));
+        uint256 sharesUnstaked = stakedSharesBefore - stakedSharesAfter;
+
+        // User1 should have unstaked ~10% of total shares (1000 out of 10000)
+        uint256 expectedUnstaked = (stakedSharesBefore * deposit1) / (deposit1 + deposit2);
+        uint256 tolerance = expectedUnstaked / 100; // 1% tolerance
+
+        assertTrue(
+            sharesUnstaked >= expectedUnstaked - tolerance &&
+            sharesUnstaked <= expectedUnstaked + tolerance,
+            "Should unstake correct proportion of shares"
+        );
+
+        // Verify remaining shares are still staked
+        assertTrue(stakedSharesAfter > 0, "Remaining shares should still be staked");
+    }
+
+    /**
+     * @notice Test _totalWithdraw with full unstaking scenario
+     * @dev Verifies complete unstaking when sharesToWithdraw >= stakedShares
+     */
+    function testTotalWithdrawFullUnstake() public {
+        uint256 depositAmount = 1000e18;
+
+        // Single client deposits
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, user1);
+
+        // Verify shares are staked
+        uint256 totalShares = autoDolaVault.balanceOf(address(vault));
+        uint256 stakedShares = mainRewarder.balanceOf(address(vault));
+        assertEq(totalShares, stakedShares, "All shares should be staked");
+        assertTrue(stakedShares > 0, "Shares should be staked");
+
+        // Initiate total withdrawal
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Advance time past waiting period
+        vm.warp(block.timestamp + 24 hours + 1);
+
+        // Execute total withdrawal
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Verify complete unstaking occurred
+        uint256 stakedSharesAfter = mainRewarder.balanceOf(address(vault));
+        assertEq(stakedSharesAfter, 0, "All shares should be unstaked");
+
+        // Verify all shares are redeemed
+        uint256 totalSharesAfter = autoDolaVault.balanceOf(address(vault));
+        assertEq(totalSharesAfter, 0, "All shares should be redeemed");
+    }
+
+    /**
+     * @notice Test _totalWithdraw correctly resets client balance to zero
+     * @dev Verifies lines 342-343: clientBalances[token][client] = 0 and totalDeposited update
+     */
+    function testTotalWithdrawBalanceReset() public {
+        uint256 deposit1 = 1000e18;
+        uint256 deposit2 = 2000e18;
+
+        // Client 1 deposits for user1
+        vm.prank(client1);
+        dolaToken.approve(address(vault), deposit1);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), deposit1, user1);
+
+        // Client 2 deposits for user2
+        vm.prank(client2);
+        dolaToken.approve(address(vault), deposit2);
+        vm.prank(client2);
+        vault.deposit(address(dolaToken), deposit2, user2);
+
+        // Verify initial balances
+        assertEq(vault.balanceOf(address(dolaToken), user1), deposit1);
+        assertEq(vault.getTotalDeposited(address(dolaToken)), deposit1 + deposit2);
+
+        // Initiate total withdrawal for user1
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Advance time past waiting period
+        vm.warp(block.timestamp + 24 hours + 1);
+
+        // Execute total withdrawal
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Verify user1 balance is reset to zero
+        assertEq(vault.balanceOf(address(dolaToken), user1), 0, "Client balance should be reset to zero");
+
+        // Verify totalDeposited is updated correctly (should only have user2's deposit)
+        assertEq(vault.getTotalDeposited(address(dolaToken)), deposit2, "Total deposited should be reduced");
+
+        // Verify user2 balance is unaffected
+        assertEq(vault.balanceOf(address(dolaToken), user2), deposit2, "Other client balance should be unchanged");
+    }
+
+    /**
+     * @notice Test _totalWithdraw edge case with zero shares
+     * @dev Verifies that attempting withdrawal with zero balance reverts at initiation
+     *      The Vault base contract prevents zero-balance withdrawals before _totalWithdraw is called
+     */
+    function testTotalWithdrawZeroShares() public {
+        // Try to withdraw from a client with no balance
+        // This should revert during initiation phase because balance is zero
+
+        // Attempt to initiate total withdrawal for user1 who has no deposits
+        // This should fail with "Vault: no balance to withdraw"
+        vm.expectRevert("Vault: no balance to withdraw");
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Verify vault state is unchanged
+        assertEq(vault.getTotalShares(), 0, "Total shares should remain zero");
+        assertEq(vault.getTotalDeposited(address(dolaToken)), 0, "Total deposited should remain zero");
+    }
 }
