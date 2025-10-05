@@ -385,9 +385,171 @@ contract AutoDolaVaultTest is Test {
         vm.prank(owner);
         vault.emergencyWithdraw(emergencyAmount);
 
-        // Verify withdrawal
+        // Verify withdrawal with precise assertion
         uint256 finalOwnerDola = dolaToken.balanceOf(owner);
-        assertTrue(finalOwnerDola >= initialOwnerDola + emergencyAmount);
+        assertApproxEqAbs(finalOwnerDola, initialOwnerDola + emergencyAmount, 1, "Emergency withdrawal should transfer requested amount within 1 wei");
+    }
+
+    /**
+     * @notice Test partial emergency withdrawal
+     * @dev Tests the scenario where owner withdraws less than the full balance (lines 291-293)
+     *      This is the normal use case for emergency withdraw - extracting specific amounts
+     */
+    function testEmergencyWithdrawPartial() public {
+        uint256 depositAmount = 2000e18;
+        uint256 firstWithdraw = 500e18;
+        uint256 secondWithdraw = 300e18;
+
+        // Setup: Make a deposit first
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, user1);
+
+        // First partial emergency withdrawal
+        uint256 ownerBalanceBefore = dolaToken.balanceOf(owner);
+        vm.prank(owner);
+        vault.emergencyWithdraw(firstWithdraw);
+
+        uint256 ownerBalanceAfter = dolaToken.balanceOf(owner);
+        assertApproxEqAbs(ownerBalanceAfter, ownerBalanceBefore + firstWithdraw, 1, "First partial withdrawal should transfer correct amount");
+
+        // Second partial emergency withdrawal
+        ownerBalanceBefore = dolaToken.balanceOf(owner);
+        vm.prank(owner);
+        vault.emergencyWithdraw(secondWithdraw);
+
+        ownerBalanceAfter = dolaToken.balanceOf(owner);
+        assertApproxEqAbs(ownerBalanceAfter, ownerBalanceBefore + secondWithdraw, 1, "Second partial withdrawal should transfer correct amount");
+
+        // Note: Emergency withdraw reduces total vault assets, which affects user's proportional balance
+        // This is expected behavior - emergency withdraw extracts actual assets from the vault
+        uint256 finalUserBalance = vault.balanceOf(address(dolaToken), user1);
+        assertLt(finalUserBalance, depositAmount, "User balance decreases as vault assets are emergency withdrawn");
+    }
+
+    /**
+     * @notice Test emergency withdraw when staked shares are less than needed
+     * @dev Tests sharesToWithdraw > stakedShares scenario (lines 298-301)
+     *      When requested amount requires more shares than are staked,
+     *      the function should unstake all available shares and redeem what it can
+     */
+    function testEmergencyWithdrawWhenStakedLessThanNeeded() public {
+        uint256 depositAmount = 3000e18;
+
+        // Setup: Make a deposit (this stakes the shares)
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, user1);
+
+        // Verify shares are staked
+        uint256 stakedShares = mainRewarder.balanceOf(address(vault));
+        assertGt(stakedShares, 0, "Shares should be staked after deposit");
+
+        // Manually unstake SOME shares to create the condition where staked < needed
+        uint256 sharesToUnstake = stakedShares / 2; // Unstake half
+        vm.prank(address(vault));
+        mainRewarder.withdraw(address(vault), sharesToUnstake, false);
+
+        // Now try to emergency withdraw a large amount that would need ALL shares
+        // This creates the condition: sharesToWithdraw > stakedShares
+        uint256 largeWithdrawAmount = depositAmount; // Try to withdraw everything
+
+        uint256 ownerBalanceBefore = dolaToken.balanceOf(owner);
+        vm.prank(owner);
+        vault.emergencyWithdraw(largeWithdrawAmount);
+
+        // Should succeed and withdraw what's possible
+        uint256 ownerBalanceAfter = dolaToken.balanceOf(owner);
+        assertGt(ownerBalanceAfter, ownerBalanceBefore, "Should withdraw some amount even with insufficient staked shares");
+    }
+
+    /**
+     * @notice Test emergency withdraw with no staked shares
+     * @dev Edge case: user has balance but nothing is staked (stakedShares = 0)
+     *      Tests the condition at line 298: if (stakedShares > 0)
+     *      When stakedShares = 0, the function should skip unstaking and proceed to redeem
+     */
+    function testEmergencyWithdrawZeroStaked() public {
+        uint256 depositAmount = 1500e18;
+
+        // Setup: Make a deposit
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, user1);
+
+        // Manually unstake ALL shares to create zero-staked condition
+        uint256 allStakedShares = mainRewarder.balanceOf(address(vault));
+        vm.prank(address(vault));
+        mainRewarder.withdraw(address(vault), allStakedShares, false);
+
+        // Verify zero staked
+        assertEq(mainRewarder.balanceOf(address(vault)), 0, "Should have zero staked shares");
+
+        // But vault still has shares (just not staked)
+        assertGt(autoDolaVault.balanceOf(address(vault)), 0, "Vault should still have autoDOLA shares");
+
+        // Emergency withdraw should still work (skip unstaking, go straight to redeem)
+        uint256 withdrawAmount = 500e18;
+        uint256 ownerBalanceBefore = dolaToken.balanceOf(owner);
+
+        vm.prank(owner);
+        vault.emergencyWithdraw(withdrawAmount);
+
+        // Should succeed and transfer funds
+        uint256 ownerBalanceAfter = dolaToken.balanceOf(owner);
+        assertApproxEqAbs(ownerBalanceAfter, ownerBalanceBefore + withdrawAmount, 1, "Emergency withdraw should work even with zero staked shares");
+    }
+
+    /**
+     * @notice Test emergency withdraw during pending total withdrawal
+     * @dev Critical test: verify emergency withdrawal doesn't interfere with pending total withdrawal mechanisms
+     *      Emergency withdraw and total withdrawal are separate mechanisms that should not conflict
+     */
+    function testEmergencyWithdrawDuringPendingTotalWithdrawal() public {
+        uint256 depositAmount = 4000e18;
+
+        // Setup: Make a deposit
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, user1);
+
+        // Initiate total withdrawal (starts 24-hour waiting period)
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // While total withdrawal is pending, perform emergency withdraw
+        uint256 emergencyAmount = 1000e18;
+        uint256 ownerBalanceBefore = dolaToken.balanceOf(owner);
+
+        vm.prank(owner);
+        vault.emergencyWithdraw(emergencyAmount);
+
+        // Emergency withdraw should succeed
+        uint256 ownerBalanceAfter = dolaToken.balanceOf(owner);
+        assertApproxEqAbs(ownerBalanceAfter, ownerBalanceBefore + emergencyAmount, 1, "Emergency withdraw should work during pending total withdrawal");
+
+        // User balance decreases proportionally due to emergency withdraw reducing vault assets
+        uint256 userBalanceAfterEmergency = vault.balanceOf(address(dolaToken), user1);
+        assertLt(userBalanceAfterEmergency, depositAmount, "User balance decreases after emergency withdraw reduces vault assets");
+
+        // Fast forward to complete total withdrawal window (24 hours + 1 second)
+        vm.warp(block.timestamp + 24 hours + 1 seconds);
+
+        // Complete the total withdrawal (should still work despite earlier emergency withdraw)
+        uint256 userBalanceBefore = vault.balanceOf(address(dolaToken), user1);
+
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Total withdrawal should reduce user's balance to zero
+        assertEq(vault.balanceOf(address(dolaToken), user1), 0, "Total withdrawal should complete successfully");
+
+        // This test verifies that emergency withdraw and total withdrawal can coexist
+        // without causing system failures or corruption
     }
 
     function testMultipleClients() public {
