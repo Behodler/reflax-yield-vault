@@ -129,11 +129,23 @@ contract AutoDolaVaultSlippage is Test {
         assertLt(balanceAfterLoss, depositAmount, "Balance should reflect the loss");
         assertApproxEqRel(balanceAfterLoss, 800e18, 1e15, "Balance should be ~80% of original");
 
-        // The slippage protection (line 243) ensures that assetsReceived >= amount
-        // In our MockAutoDOLA, the redeem function correctly calculates assets based on shares
-        // This means the protection is working: users can only withdraw what's actually available
+        // CRITICAL TEST: Test line 243 slippage protection
+        // Enable slippage to simulate autoDOLA vault returning less than expected
+        // This tests the specific protection: require(assetsReceived >= amount, "AutoDolaVault: insufficient assets received")
+        autoDolaVault.enableSlippage(10); // 10% slippage
 
-        // Verify that withdrawing the actual available amount works
+        // Try to withdraw balanceAfterLoss (~800e18)
+        // Due to 10% slippage, autoDOLA will only return ~720e18 (90% of 800e18)
+        // This triggers line 243 protection because assetsReceived (720e18) < amount (800e18)
+        vm.prank(client1);
+        vm.expectRevert("AutoDolaVault: insufficient assets received");
+        vault.withdraw(address(dolaToken), balanceAfterLoss, recipient1);
+
+        // Disable slippage for subsequent operations
+        // (Note: expectRevert rolls back state, so slippage is still enabled)
+        autoDolaVault.disableSlippage();
+
+        // Now withdraw should work normally without slippage
         uint256 safeWithdrawAmount = balanceAfterLoss;
         _withdraw(client1, safeWithdrawAmount, recipient1);
 
@@ -331,13 +343,22 @@ contract MockAutoDOLA is MockERC20 {
         require(_balances[owner] >= shares, "Insufficient shares");
 
         assets = convertToAssets(shares);
+
+        // Apply slippage if enabled (simulates market conditions where redemption < expected)
+        uint256 actualAssets = assets;
+        if (_slippageEnabled) {
+            actualAssets = assets - (assets * _slippagePercent / 100);
+            // Disable slippage after one use (one-time trigger)
+            _slippageEnabled = false;
+        }
+
         _burn(owner, shares);
         _balances[owner] -= shares;
         _totalShares -= shares;
-        _totalAssets -= assets;
+        _totalAssets -= actualAssets; // Use actual assets transferred
 
-        MockERC20(_asset).transfer(receiver, assets);
-        return assets;
+        MockERC20(_asset).transfer(receiver, actualAssets);
+        return actualAssets;
     }
 
     function convertToShares(uint256 assets) public view returns (uint256) {
@@ -371,6 +392,20 @@ contract MockAutoDOLA is MockERC20 {
         _totalAssets -= lossAmount;
         // Burn the actual DOLA tokens to reflect the loss
         MockERC20(_asset).burn(address(this), lossAmount);
+    }
+
+    // Simulate slippage - force the next redeem to return less assets than calculated
+    bool private _slippageEnabled;
+    uint256 private _slippagePercent; // Percentage to reduce (e.g., 10 = 10% slippage)
+
+    function enableSlippage(uint256 slippagePercent) external {
+        _slippageEnabled = true;
+        _slippagePercent = slippagePercent;
+    }
+
+    function disableSlippage() external {
+        _slippageEnabled = false;
+        _slippagePercent = 0;
     }
 }
 
