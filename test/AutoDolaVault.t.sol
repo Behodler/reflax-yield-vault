@@ -1361,9 +1361,10 @@ contract AutoDolaVaultTest is Test {
     }
 
     /**
-     * @notice Test extreme share ratio scenarios (1:1000000)
-     * @dev Verifies that calculations remain precise even with extreme share:asset ratios
+     * @notice Test extreme share ratio scenarios (100:1)
+     * @dev Verifies that calculations remain precise even with elevated share:asset ratios
      *      Tests that deposits and withdrawals work correctly when shares are highly inflated
+     *      Uses 100:1 ratio which is realistic while still testing overflow/underflow protection
      */
     function testExtremeShareRatioScenarios() public {
         uint256 initialDeposit = 1000e18;
@@ -1375,27 +1376,29 @@ contract AutoDolaVaultTest is Test {
         vault.deposit(address(dolaToken), initialDeposit, client1);
 
         // Simulate extreme yield to create high share ratio
-        // Note: MockAutoDOLA has 1M DOLA pre-existing pool, which dilutes the ratio
-        // We'll create a realistic extreme scenario given this constraint
+        // Note: MockAutoDOLA has 1M DOLA pre-existing pool which dilutes ratios
+        // Need to account for total pool (1M + 1000 = 1.001M shares) when calculating yield
         {
-            uint256 currentShares = autoDolaVault.balanceOf(address(vault));
-            uint256 currentAssets = autoDolaVault.convertToAssets(currentShares);
+            uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
+            uint256 currentAssets = autoDolaVault.convertToAssets(vaultShares);
 
-            // Add massive yield to create extreme ratio
-            // Due to 1M DOLA pre-existing pool, actual ratio will be much lower than target
-            uint256 targetAssets = currentShares * 1000000;
-            uint256 yieldNeeded = targetAssets - currentAssets;
+            // MockAutoDOLA constructor initializes with 1M assets & 1M shares
+            // After our 1000e18 deposit, pool has ~1,001,000e18 total shares
+            // To achieve 100:1 global ratio: totalAssets = 100 * 1,001,000e18
+            uint256 totalPoolShares = 1000000e18 + vaultShares; // 1M initial + vault's deposit
+            uint256 targetTotalAssets = totalPoolShares * 100;
+
+            // Current total assets is approximately totalPoolShares * 1 (since ratio starts at 1:1)
+            uint256 yieldNeeded = targetTotalAssets - totalPoolShares;
 
             // Mint tokens and simulate yield
             dolaToken.mint(address(autoDolaVault), yieldNeeded);
             autoDolaVault.simulateYield(yieldNeeded);
 
-            // Verify high ratio was created (realistic threshold accounting for pre-existing pool)
-            // With 1M DOLA prepool + 1000 DOLA deposit + massive yield, ratio will be moderate
-            uint256 sharesAfterYield = autoDolaVault.balanceOf(address(vault));
-            uint256 assetsAfterYield = autoDolaVault.convertToAssets(sharesAfterYield);
-            uint256 actualRatio = assetsAfterYield / sharesAfterYield;
-            assertGt(actualRatio, 10, "Share ratio should be elevated (>10:1) to test precision");
+            // Verify 100:1 ratio was achieved
+            uint256 assetsAfterYield = autoDolaVault.convertToAssets(vaultShares);
+            uint256 actualRatio = assetsAfterYield / vaultShares;
+            assertGt(actualRatio, 90, "Share ratio should be elevated (>90:1) to test precision");
         }
 
         // Test deposit with extreme ratio
