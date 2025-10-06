@@ -1454,4 +1454,195 @@ contract AutoDolaVaultTest is Test {
             }
         }
     }
+
+    // ============ TOKE Reward Interference Tests (Story 008.11) ============
+
+    /**
+     * @notice Test claiming TOKE rewards during a pending total withdrawal
+     * @dev Verifies that claiming rewards doesn't corrupt withdrawal state or interfere with pending total withdrawals
+     *      Tests the critical scenario where rewards are claimed while a total withdrawal is in progress
+     *      This ensures reward claiming and withdrawal mechanisms are independent and don't conflict
+     */
+    function testClaimRewardsDuringPendingTotalWithdrawal() public {
+        uint256 depositAmount = 5000e18;
+        uint256 rewardAmount = 100e18;
+
+        // Setup: Make a deposit
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, user1);
+
+        // Simulate earning TOKE rewards
+        mainRewarder.simulateRewards(address(vault), rewardAmount);
+
+        // Verify rewards are available before total withdrawal
+        uint256 rewardsBeforeWithdrawal = vault.getTokeRewards();
+        assertEq(rewardsBeforeWithdrawal, rewardAmount, "Rewards should be available before total withdrawal");
+
+        // Initiate total withdrawal (starts 24-hour waiting period)
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Record user balance before claiming rewards
+        uint256 userBalanceBeforeClaim = vault.balanceOf(address(dolaToken), user1);
+        uint256 totalDepositedBeforeClaim = vault.getTotalDeposited(address(dolaToken));
+        uint256 totalSharesBeforeClaim = vault.getTotalShares();
+
+        // While total withdrawal is pending, claim TOKE rewards
+        uint256 ownerTokeBalanceBefore = tokeToken.balanceOf(owner);
+        vm.prank(owner);
+        vault.claimTokeRewards(owner);
+
+        // Verify rewards were claimed successfully
+        uint256 ownerTokeBalanceAfter = tokeToken.balanceOf(owner);
+        assertEq(ownerTokeBalanceAfter, ownerTokeBalanceBefore + rewardAmount, "Owner should receive TOKE rewards");
+        assertEq(vault.getTokeRewards(), 0, "Rewards should be fully claimed");
+
+        // CRITICAL: Verify that claiming rewards didn't corrupt withdrawal state
+        uint256 userBalanceAfterClaim = vault.balanceOf(address(dolaToken), user1);
+        uint256 totalDepositedAfterClaim = vault.getTotalDeposited(address(dolaToken));
+        uint256 totalSharesAfterClaim = vault.getTotalShares();
+
+        assertEq(userBalanceAfterClaim, userBalanceBeforeClaim, "User balance should not change when rewards are claimed");
+        assertEq(totalDepositedAfterClaim, totalDepositedBeforeClaim, "Total deposited should not change when rewards are claimed");
+        assertEq(totalSharesAfterClaim, totalSharesBeforeClaim, "Total shares should not change when rewards are claimed");
+
+        // Fast forward to complete total withdrawal window (24 hours + 1 second)
+        vm.warp(block.timestamp + 24 hours + 1 seconds);
+
+        // Complete the total withdrawal (should still work correctly despite rewards being claimed)
+        vm.prank(owner);
+        vault.totalWithdrawal(address(dolaToken), user1);
+
+        // Verify total withdrawal completed successfully
+        assertEq(vault.balanceOf(address(dolaToken), user1), 0, "Total withdrawal should complete and zero user balance");
+
+        // This test proves that reward claiming and total withdrawal are independent mechanisms
+        // and that claiming rewards during pending withdrawal doesn't corrupt state
+    }
+
+    /**
+     * @notice Test claiming TOKE rewards when user has no staked shares
+     * @dev Verifies proper handling of edge case where rewards are claimed with zero stake
+     *      This tests defensive programming - claiming with no stake should not revert
+     *      but should return zero rewards or handle gracefully
+     */
+    function testClaimRewardsNoStake() public {
+        // Verify vault starts with no staked shares
+        uint256 initialStakedShares = mainRewarder.balanceOf(address(vault));
+        assertEq(initialStakedShares, 0, "Vault should have no staked shares initially");
+
+        // Verify no rewards are available
+        uint256 initialRewards = vault.getTokeRewards();
+        assertEq(initialRewards, 0, "No rewards should be available with no stake");
+
+        // Attempt to claim rewards with zero stake
+        uint256 ownerTokeBalanceBefore = tokeToken.balanceOf(owner);
+
+        vm.prank(owner);
+        vault.claimTokeRewards(owner);
+
+        // Verify claim succeeded but transferred zero tokens
+        uint256 ownerTokeBalanceAfter = tokeToken.balanceOf(owner);
+        assertEq(ownerTokeBalanceAfter, ownerTokeBalanceBefore, "Owner should receive zero TOKE with no stake");
+        assertEq(vault.getTokeRewards(), 0, "Rewards should remain zero");
+
+        // Make a deposit to create stake, then fully withdraw to return to zero stake
+        uint256 depositAmount = 1000e18;
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, client1);
+
+        // Verify shares are now staked
+        uint256 stakedAfterDeposit = mainRewarder.balanceOf(address(vault));
+        assertGt(stakedAfterDeposit, 0, "Shares should be staked after deposit");
+
+        // Withdraw all funds to return to zero stake
+        vm.prank(client1);
+        vault.withdraw(address(dolaToken), depositAmount, user2);
+
+        // Verify no shares are staked again
+        uint256 stakedAfterWithdraw = mainRewarder.balanceOf(address(vault));
+        assertEq(stakedAfterWithdraw, 0, "All shares should be unstaked after full withdrawal");
+
+        // Attempt to claim rewards again with zero stake
+        ownerTokeBalanceBefore = tokeToken.balanceOf(owner);
+
+        vm.prank(owner);
+        vault.claimTokeRewards(owner);
+
+        // Verify claim succeeded but transferred zero tokens
+        ownerTokeBalanceAfter = tokeToken.balanceOf(owner);
+        assertEq(ownerTokeBalanceAfter, ownerTokeBalanceBefore, "Owner should receive zero TOKE after full withdrawal");
+
+        // This test proves the vault handles claiming with no stake gracefully
+    }
+
+    /**
+     * @notice Improved test for TOKE reward claiming with intermediate assertion
+     * @dev Enhances existing testTokeRewardsClaim with better validation of reward calculations
+     *      Adds intermediate checks to verify reward amounts are accurate during the claim process
+     *      This strengthens test quality by validating state at multiple points
+     */
+    function testTokeRewardsClaimImproved() public {
+        uint256 depositAmount = 1000e18;
+        uint256 rewardAmount = 50e18;
+
+        // Deposit to enable staking
+        vm.prank(client1);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), depositAmount, user1);
+
+        // Verify shares are staked
+        uint256 stakedShares = mainRewarder.balanceOf(address(vault));
+        assertGt(stakedShares, 0, "Shares should be staked after deposit");
+
+        // Simulate earning TOKE rewards
+        mainRewarder.simulateRewards(address(vault), rewardAmount);
+
+        // INTERMEDIATE ASSERTION: Verify exact reward amount is available before claiming
+        uint256 rewardsAvailableBeforeClaim = vault.getTokeRewards();
+        assertEq(rewardsAvailableBeforeClaim, rewardAmount, "Exact reward amount should be available before claim");
+
+        // Record vault's TOKE balance before claim (should be zero initially)
+        uint256 vaultTokeBalanceBeforeClaim = tokeToken.balanceOf(address(vault));
+        assertEq(vaultTokeBalanceBeforeClaim, 0, "Vault should have no TOKE tokens before claim");
+
+        // Only owner can claim (verify authorization)
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", client1));
+        vm.prank(client1);
+        vault.claimTokeRewards(user1);
+
+        // Owner claims rewards
+        uint256 recipientTokeBalanceBefore = tokeToken.balanceOf(user1);
+
+        vm.prank(owner);
+        vault.claimTokeRewards(user1);
+
+        // INTERMEDIATE ASSERTION: Verify exact reward amount was transferred to recipient
+        uint256 recipientTokeBalanceAfter = tokeToken.balanceOf(user1);
+        uint256 actualRewardsReceived = recipientTokeBalanceAfter - recipientTokeBalanceBefore;
+        assertEq(actualRewardsReceived, rewardAmount, "Recipient should receive exact reward amount");
+
+        // Verify rewards are now zero after claiming
+        uint256 rewardsAfterClaim = vault.getTokeRewards();
+        assertEq(rewardsAfterClaim, 0, "Rewards should be zero after claiming");
+
+        // Verify vault doesn't retain any TOKE (all transferred to recipient)
+        uint256 vaultTokeBalanceAfterClaim = tokeToken.balanceOf(address(vault));
+        assertEq(vaultTokeBalanceAfterClaim, 0, "Vault should not retain TOKE tokens after claim");
+
+        // ADDITIONAL ASSERTION: Verify claiming when no rewards available
+        vm.prank(owner);
+        vault.claimTokeRewards(user1);
+
+        // Balance should remain unchanged when claiming with no rewards
+        assertEq(tokeToken.balanceOf(user1), recipientTokeBalanceAfter, "Balance should not change when claiming zero rewards");
+
+        // This improved test validates reward amounts at multiple points in the process
+        // providing stronger guarantees about the accuracy of reward calculations
+    }
 }
