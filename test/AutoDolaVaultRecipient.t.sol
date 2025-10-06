@@ -369,4 +369,159 @@ contract AutoDolaVaultRecipientTest is Test {
         // client1 (depositor) should still have zero balance (no yield for them)
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Depositor should not receive any yield");
     }
+
+    /**
+     * @notice Test Story 008.10: Multiple deposits to same recipient accumulate correctly
+     * @dev Verifies balance accumulation at line 199 (clientBalances[token][recipient] += amount)
+     */
+    function testMultipleDepositsToSameRecipient() public {
+        uint256 deposit1 = 1000e18;
+        uint256 deposit2 = 2000e18;
+        uint256 deposit3 = 500e18;
+
+        // First deposit: client1 deposits for alice
+        vm.prank(client1);
+        dolaToken.approve(address(vault), deposit1);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), deposit1, alice);
+
+        // Verify first deposit balance
+        assertEq(vault.balanceOf(address(dolaToken), alice), deposit1, "First deposit should be tracked");
+
+        // Second deposit: client1 deposits for alice again
+        vm.prank(client1);
+        dolaToken.approve(address(vault), deposit2);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), deposit2, alice);
+
+        // Verify accumulated balance after second deposit
+        assertEq(vault.balanceOf(address(dolaToken), alice), deposit1 + deposit2, "Second deposit should accumulate");
+
+        // Third deposit: client2 deposits for alice (different client, same recipient)
+        vm.prank(client2);
+        dolaToken.approve(address(vault), deposit3);
+        vm.prank(client2);
+        vault.deposit(address(dolaToken), deposit3, alice);
+
+        // CRITICAL: Verify line 199 accumulation logic works correctly
+        // clientBalances[token][recipient] += amount should accumulate all three deposits
+        uint256 expectedTotal = deposit1 + deposit2 + deposit3;
+        assertEq(vault.balanceOf(address(dolaToken), alice), expectedTotal, "All deposits should accumulate to same recipient");
+
+        // Verify total deposited tracking
+        assertEq(vault.getTotalDeposited(address(dolaToken)), expectedTotal, "Total deposited should match sum of all deposits");
+
+        // Verify depositors have no balance
+        assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Depositor client1 should have no balance");
+        assertEq(vault.balanceOf(address(dolaToken), client2), 0, "Depositor client2 should have no balance");
+    }
+
+    /**
+     * @notice Test Story 008.10: Withdrawal after multiple deposits works correctly
+     * @dev Verifies that withdrawals work properly after accumulated deposits
+     */
+    function testWithdrawAfterMultipleDeposits() public {
+        uint256 deposit1 = 1000e18;
+        uint256 deposit2 = 1500e18;
+        uint256 deposit3 = 500e18;
+        uint256 totalDeposited = deposit1 + deposit2 + deposit3;
+        uint256 withdrawAmount = 2000e18;
+
+        // Multiple deposits for bob from different clients
+        vm.prank(client1);
+        dolaToken.approve(address(vault), deposit1);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), deposit1, bob);
+
+        vm.prank(client1);
+        dolaToken.approve(address(vault), deposit2);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), deposit2, bob);
+
+        vm.prank(client2);
+        dolaToken.approve(address(vault), deposit3);
+        vm.prank(client2);
+        vault.deposit(address(dolaToken), deposit3, bob);
+
+        // Verify accumulated balance
+        assertEq(vault.balanceOf(address(dolaToken), bob), totalDeposited, "Bob should have accumulated balance");
+
+        // Authorize bob to withdraw
+        vm.prank(owner);
+        vault.setClient(bob, true);
+
+        // Bob withdraws part of the accumulated balance
+        uint256 aliceDolaBalanceBefore = dolaToken.balanceOf(alice);
+        vm.prank(bob);
+        vault.withdraw(address(dolaToken), withdrawAmount, alice);
+
+        // Verify withdrawal succeeded
+        uint256 remainingBalance = totalDeposited - withdrawAmount;
+        assertEq(vault.balanceOf(address(dolaToken), bob), remainingBalance, "Bob's balance should be reduced by withdrawal amount");
+        assertEq(dolaToken.balanceOf(alice), aliceDolaBalanceBefore + withdrawAmount, "Alice should receive withdrawn DOLA");
+
+        // Bob withdraws remaining balance
+        vm.prank(bob);
+        vault.withdraw(address(dolaToken), remainingBalance, alice);
+
+        // Verify complete withdrawal
+        assertEq(vault.balanceOf(address(dolaToken), bob), 0, "Bob should have zero balance after full withdrawal");
+    }
+
+    /**
+     * @notice Test Story 008.10: Verify totalDeposited accumulates correctly across multiple deposits
+     * @dev Verifies that totalDeposited tracking is accurate for multiple recipients
+     */
+    function testTotalDepositedAccumulatesCorrectly() public {
+        uint256 aliceDeposit1 = 1000e18;
+        uint256 aliceDeposit2 = 500e18;
+        uint256 bobDeposit1 = 2000e18;
+        uint256 bobDeposit2 = 1500e18;
+
+        // Initial state
+        assertEq(vault.getTotalDeposited(address(dolaToken)), 0, "Initial total deposited should be zero");
+
+        // First deposit for alice
+        vm.prank(client1);
+        dolaToken.approve(address(vault), aliceDeposit1);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), aliceDeposit1, alice);
+
+        assertEq(vault.getTotalDeposited(address(dolaToken)), aliceDeposit1, "Total deposited after first deposit");
+
+        // Second deposit for alice (accumulation test)
+        vm.prank(client1);
+        dolaToken.approve(address(vault), aliceDeposit2);
+        vm.prank(client1);
+        vault.deposit(address(dolaToken), aliceDeposit2, alice);
+
+        uint256 expectedAfterAlice = aliceDeposit1 + aliceDeposit2;
+        assertEq(vault.getTotalDeposited(address(dolaToken)), expectedAfterAlice, "Total deposited after alice's second deposit");
+
+        // First deposit for bob
+        vm.prank(client2);
+        dolaToken.approve(address(vault), bobDeposit1);
+        vm.prank(client2);
+        vault.deposit(address(dolaToken), bobDeposit1, bob);
+
+        uint256 expectedAfterBob1 = expectedAfterAlice + bobDeposit1;
+        assertEq(vault.getTotalDeposited(address(dolaToken)), expectedAfterBob1, "Total deposited after bob's first deposit");
+
+        // Second deposit for bob
+        vm.prank(client2);
+        dolaToken.approve(address(vault), bobDeposit2);
+        vm.prank(client2);
+        vault.deposit(address(dolaToken), bobDeposit2, bob);
+
+        uint256 expectedTotal = aliceDeposit1 + aliceDeposit2 + bobDeposit1 + bobDeposit2;
+        assertEq(vault.getTotalDeposited(address(dolaToken)), expectedTotal, "Total deposited should accumulate all deposits");
+
+        // Verify individual balances
+        assertEq(vault.balanceOf(address(dolaToken), alice), aliceDeposit1 + aliceDeposit2, "Alice's balance should be correct");
+        assertEq(vault.balanceOf(address(dolaToken), bob), bobDeposit1 + bobDeposit2, "Bob's balance should be correct");
+
+        // Verify totalDeposited matches sum of individual balances
+        uint256 sumOfBalances = (aliceDeposit1 + aliceDeposit2) + (bobDeposit1 + bobDeposit2);
+        assertEq(vault.getTotalDeposited(address(dolaToken)), sumOfBalances, "Total deposited should equal sum of balances");
+    }
 }
