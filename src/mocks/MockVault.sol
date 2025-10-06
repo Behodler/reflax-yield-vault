@@ -107,6 +107,29 @@ contract MockVault is Vault {
         IERC20(token).transfer(owner(), amount);
     }
 
+    /**
+     * @notice Internal withdrawFrom implementation for authorized surplus withdrawal
+     * @param token The token address to withdraw
+     * @param client The client address whose balance to withdraw from
+     * @param amount The amount to withdraw
+     * @param recipient The address that will receive the withdrawn tokens
+     * @dev Allows authorized withdrawers to extract surplus from client balances
+     */
+    function _withdrawFrom(address token, address client, uint256 amount, address recipient) internal override {
+        require(token != address(0), "MockVault: token is zero address");
+        require(client != address(0), "MockVault: client is zero address");
+        require(recipient != address(0), "MockVault: recipient is zero address");
+        require(amount > 0, "MockVault: amount is zero");
+        require(balances[token][client] >= amount, "MockVault: insufficient balance for withdrawFrom");
+
+        // Update internal accounting - remove balance from client
+        balances[token][client] -= amount;
+        totalDeposits[token] -= amount;
+
+        // Transfer tokens from vault to recipient (not owner, unlike totalWithdraw)
+        IERC20(token).transfer(recipient, amount);
+    }
+
     // Additional helper functions for testing
     function getTotalDeposits(address token) external view returns (uint256) {
         return totalDeposits[token];

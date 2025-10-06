@@ -346,4 +346,53 @@ contract AutoDolaVault is Vault {
             dolaToken.safeTransfer(owner(), assetsReceived);
         }
     }
+
+    /**
+     * @notice Internal withdrawFrom implementation for authorized surplus withdrawal
+     * @param token The token address (must be DOLA)
+     * @param client The client address whose balance to withdraw from
+     * @param amount The amount to withdraw
+     * @param recipient The address that will receive the withdrawn tokens
+     * @dev Similar to regular withdraw but allows authorized withdrawers to extract surplus
+     */
+    function _withdrawFrom(address token, address client, uint256 amount, address recipient) internal override {
+        require(token == address(dolaToken), "AutoDolaVault: only DOLA token supported");
+        require(amount > 0, "AutoDolaVault: amount must be greater than zero");
+
+        // Get current client balance (includes yield)
+        uint256 currentBalance = this.balanceOf(token, client);
+        require(amount <= currentBalance, "AutoDolaVault: insufficient balance");
+
+        // Calculate the proportional amount of shares to withdraw
+        uint256 totalShares = autoDolaVault.balanceOf(address(this));
+        require(totalShares > 0, "AutoDolaVault: no shares available");
+
+        // Calculate client's current proportional share
+        uint256 clientStoredBalance = clientBalances[token][client];
+        uint256 clientCurrentShares = (totalShares * clientStoredBalance) / totalDeposited[token];
+
+        // Calculate shares to withdraw based on requested amount vs current balance
+        uint256 sharesToWithdraw = (clientCurrentShares * amount) / currentBalance;
+        require(sharesToWithdraw > 0, "AutoDolaVault: no shares to withdraw");
+
+        // Unstake from MainRewarder first
+        mainRewarder.withdraw(address(this), sharesToWithdraw, false);
+
+        // Withdraw from autoDOLA vault
+        uint256 dolaBefore = dolaToken.balanceOf(address(this));
+        uint256 assetsReceived = autoDolaVault.redeem(sharesToWithdraw, address(this), address(this));
+        uint256 dolaAfter = dolaToken.balanceOf(address(this));
+
+        // Verify withdrawal
+        require(dolaAfter == dolaBefore + assetsReceived, "AutoDolaVault: DOLA withdrawal mismatch");
+        require(assetsReceived >= amount, "AutoDolaVault: insufficient assets received");
+
+        // Update client balance proportionally
+        uint256 balanceReduction = (clientStoredBalance * amount) / currentBalance;
+        clientBalances[token][client] -= balanceReduction;
+        totalDeposited[token] -= balanceReduction;
+
+        // Transfer DOLA to recipient (instead of msg.sender as in regular withdraw)
+        dolaToken.safeTransfer(recipient, amount);
+    }
 }

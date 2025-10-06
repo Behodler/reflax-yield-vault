@@ -18,6 +18,9 @@ abstract contract Vault is IVault, Ownable, ReentrancyGuard {
     /// @notice Mapping of addresses authorized to deposit/withdraw
     mapping(address => bool) public authorizedClients;
 
+    /// @notice Mapping of addresses authorized to withdraw on behalf of clients
+    mapping(address => bool) public authorizedWithdrawers;
+
     /// @notice Withdrawal status enumeration
     enum WithdrawalStatus {
         None,       // No withdrawal initiated
@@ -49,6 +52,29 @@ abstract contract Vault is IVault, Ownable, ReentrancyGuard {
      * @param authorized Whether the client is now authorized (true) or not (false)
      */
     event ClientAuthorizationSet(address indexed client, bool authorized);
+
+    /**
+     * @notice Emitted when withdrawer authorization is updated
+     * @param withdrawer The withdrawer address whose authorization was changed
+     * @param authorized Whether the withdrawer is now authorized (true) or not (false)
+     */
+    event WithdrawerAuthorizationSet(address indexed withdrawer, bool authorized);
+
+    /**
+     * @notice Emitted when an authorized withdrawer withdraws from a client balance
+     * @param token The token address that was withdrawn
+     * @param client The client address whose balance was withdrawn from
+     * @param withdrawer The withdrawer address that performed the withdrawal
+     * @param amount The amount that was withdrawn
+     * @param recipient The address that received the withdrawn tokens
+     */
+    event WithdrawnFrom(
+        address indexed token,
+        address indexed client,
+        address indexed withdrawer,
+        uint256 amount,
+        address recipient
+    );
     
     /**
      * @notice Emitted when an emergency withdrawal is performed
@@ -88,13 +114,22 @@ abstract contract Vault is IVault, Ownable, ReentrancyGuard {
     );
     
     // ============ MODIFIERS ============
-    
+
     /**
      * @notice Restricts access to only authorized client contracts
      * @dev Reverts if the caller is not an authorized client address
      */
     modifier onlyAuthorizedClient() {
         require(authorizedClients[msg.sender], "Vault: unauthorized, only authorized clients");
+        _;
+    }
+
+    /**
+     * @notice Restricts access to only authorized withdrawer addresses
+     * @dev Reverts if the caller is not an authorized withdrawer
+     */
+    modifier onlyAuthorizedWithdrawer() {
+        require(authorizedWithdrawers[msg.sender], "Vault: unauthorized, only authorized withdrawers");
         _;
     }
     
@@ -118,10 +153,24 @@ abstract contract Vault is IVault, Ownable, ReentrancyGuard {
      */
     function setClient(address client, bool _auth) external override onlyOwner {
         require(client != address(0), "Vault: client cannot be zero address");
-        
+
         authorizedClients[client] = _auth;
-        
+
         emit ClientAuthorizationSet(client, _auth);
+    }
+
+    /**
+     * @notice Set withdrawer authorization for surplus withdrawal operations
+     * @param withdrawer The address of the withdrawer
+     * @param _auth Whether to authorize (true) or deauthorize (false) the withdrawer
+     * @dev Only the contract owner can call this function
+     */
+    function setWithdrawer(address withdrawer, bool _auth) external onlyOwner {
+        require(withdrawer != address(0), "Vault: withdrawer cannot be zero address");
+
+        authorizedWithdrawers[withdrawer] = _auth;
+
+        emit WithdrawerAuthorizationSet(withdrawer, _auth);
     }
     
     /**
@@ -173,7 +222,36 @@ abstract contract Vault is IVault, Ownable, ReentrancyGuard {
             );
         }
     }
-    
+
+    /**
+     * @notice Withdraw surplus from a client's balance to a specified recipient
+     * @param token The token address to withdraw
+     * @param client The client address whose balance to withdraw from
+     * @param amount The amount to withdraw
+     * @param recipient The address that will receive the withdrawn tokens
+     * @dev Only authorized withdrawers can call this function. This is used to extract surplus yield.
+     */
+    function withdrawFrom(
+        address token,
+        address client,
+        uint256 amount,
+        address recipient
+    ) external onlyAuthorizedWithdrawer nonReentrant {
+        require(token != address(0), "Vault: token cannot be zero address");
+        require(client != address(0), "Vault: client cannot be zero address");
+        require(recipient != address(0), "Vault: recipient cannot be zero address");
+        require(amount > 0, "Vault: amount must be greater than zero");
+
+        // Check that client has sufficient balance
+        uint256 clientBalance = this.balanceOf(token, client);
+        require(clientBalance >= amount, "Vault: insufficient client balance");
+
+        // Perform the withdrawal through the virtual function
+        _withdrawFrom(token, client, amount, recipient);
+
+        emit WithdrawnFrom(token, client, msg.sender, amount, recipient);
+    }
+
     // ============ VIRTUAL FUNCTIONS ============
     
     /**
@@ -191,6 +269,16 @@ abstract contract Vault is IVault, Ownable, ReentrancyGuard {
      * @dev Must be implemented by concrete vault contracts to define total withdrawal logic
      */
     function _totalWithdraw(address token, address client, uint256 amount) internal virtual;
+
+    /**
+     * @notice Internal withdrawFrom implementation to be overridden by concrete contracts
+     * @param token The token address to withdraw
+     * @param client The client address whose balance to withdraw from
+     * @param amount The amount to withdraw
+     * @param recipient The address that will receive the withdrawn tokens
+     * @dev Must be implemented by concrete vault contracts to define withdrawFrom logic
+     */
+    function _withdrawFrom(address token, address client, uint256 amount, address recipient) internal virtual;
     
     // ============ VIRTUAL FUNCTIONS ============
     
