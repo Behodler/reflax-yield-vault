@@ -342,4 +342,217 @@ contract TotalWithdrawalTest is Test {
         // The withdrawal should use the cached balance, not current balance
         assertEq(vault.balanceOf(address(token), client), 0);
     }
+
+    // ============ CONCURRENT OPERATIONS TESTS ============
+
+    function testTotalWithdrawalMultipleClientsSequential() public {
+        // Setup: Create 3 clients with deposits
+        address client2 = address(5);
+        address client3 = address(6);
+
+        // Setup client2
+        token.mint(client2, DEPOSIT_AMOUNT);
+        vm.prank(owner);
+        vault.setClient(client2, true);
+        vm.startPrank(client2);
+        token.approve(address(vault), DEPOSIT_AMOUNT);
+        vault.deposit(address(token), DEPOSIT_AMOUNT, client2);
+        vm.stopPrank();
+
+        // Setup client3
+        token.mint(client3, DEPOSIT_AMOUNT);
+        vm.prank(owner);
+        vault.setClient(client3, true);
+        vm.startPrank(client3);
+        token.approve(address(vault), DEPOSIT_AMOUNT);
+        vault.deposit(address(token), DEPOSIT_AMOUNT, client3);
+        vm.stopPrank();
+
+        // Verify initial deposits
+        assertEq(vault.balanceOf(address(token), client), DEPOSIT_AMOUNT);
+        assertEq(vault.balanceOf(address(token), client2), DEPOSIT_AMOUNT);
+        assertEq(vault.balanceOf(address(token), client3), DEPOSIT_AMOUNT);
+
+        // Initiate total withdrawals SEQUENTIALLY
+        uint256 startTime = block.timestamp;
+
+        // Client 1 initiates withdrawal
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client);
+        {
+            (uint256 initiatedAt1, Vault.WithdrawalStatus status1, uint256 balance1) = vault.withdrawalStates(address(token), client);
+            assertEq(initiatedAt1, startTime);
+            assertTrue(status1 == Vault.WithdrawalStatus.Initiated);
+            assertEq(balance1, DEPOSIT_AMOUNT);
+        }
+
+        // Client 2 initiates withdrawal (1 hour later)
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client2);
+        {
+            (uint256 initiatedAt2, Vault.WithdrawalStatus status2, uint256 balance2) = vault.withdrawalStates(address(token), client2);
+            assertEq(initiatedAt2, startTime + 1 hours);
+            assertTrue(status2 == Vault.WithdrawalStatus.Initiated);
+            assertEq(balance2, DEPOSIT_AMOUNT);
+        }
+
+        // Client 3 initiates withdrawal (2 hours after start)
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client3);
+        {
+            (uint256 initiatedAt3, Vault.WithdrawalStatus status3, uint256 balance3) = vault.withdrawalStates(address(token), client3);
+            assertEq(initiatedAt3, startTime + 2 hours);
+            assertTrue(status3 == Vault.WithdrawalStatus.Initiated);
+            assertEq(balance3, DEPOSIT_AMOUNT);
+        }
+
+        // Verify each client has independent withdrawal state with different timestamps
+        {
+            (uint256 check1,,) = vault.withdrawalStates(address(token), client);
+            assertEq(check1, startTime);
+        }
+        {
+            (uint256 check2,,) = vault.withdrawalStates(address(token), client2);
+            assertEq(check2, startTime + 1 hours);
+        }
+        {
+            (uint256 check3,,) = vault.withdrawalStates(address(token), client3);
+            assertEq(check3, startTime + 2 hours);
+        }
+
+        // Execute withdrawals sequentially (warp time between each)
+        uint256 ownerBalanceBefore = token.balanceOf(owner);
+
+        // Execute client 1 withdrawal (24 hours after initiation)
+        vm.warp(startTime + WAITING_PERIOD + 1);
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client);
+        assertEq(vault.balanceOf(address(token), client), 0);
+
+        // Execute client 2 withdrawal (24 hours after their initiation)
+        vm.warp(startTime + 1 hours + WAITING_PERIOD + 1);
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client2);
+        assertEq(vault.balanceOf(address(token), client2), 0);
+
+        // Execute client 3 withdrawal (24 hours after their initiation)
+        vm.warp(startTime + 2 hours + WAITING_PERIOD + 1);
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client3);
+        assertEq(vault.balanceOf(address(token), client3), 0);
+
+        // Verify all clients successfully withdrew with correct amounts
+        assertEq(token.balanceOf(owner), ownerBalanceBefore + (DEPOSIT_AMOUNT * 3));
+
+        // Confirm no state corruption - all withdrawal states reset
+        {
+            (, Vault.WithdrawalStatus finalStatus1,) = vault.withdrawalStates(address(token), client);
+            (, Vault.WithdrawalStatus finalStatus2,) = vault.withdrawalStates(address(token), client2);
+            (, Vault.WithdrawalStatus finalStatus3,) = vault.withdrawalStates(address(token), client3);
+            assertTrue(finalStatus1 == Vault.WithdrawalStatus.None);
+            assertTrue(finalStatus2 == Vault.WithdrawalStatus.None);
+            assertTrue(finalStatus3 == Vault.WithdrawalStatus.None);
+        }
+    }
+
+    function testEmergencyWithdrawBetweenClientWithdrawals() public {
+        // Setup: Create 3 clients with deposits
+        address client2 = address(5);
+        address client3 = address(6);
+
+        // Setup client2
+        token.mint(client2, DEPOSIT_AMOUNT);
+        vm.prank(owner);
+        vault.setClient(client2, true);
+        vm.startPrank(client2);
+        token.approve(address(vault), DEPOSIT_AMOUNT);
+        vault.deposit(address(token), DEPOSIT_AMOUNT, client2);
+        vm.stopPrank();
+
+        // Setup client3
+        token.mint(client3, DEPOSIT_AMOUNT);
+        vm.prank(owner);
+        vault.setClient(client3, true);
+        vm.startPrank(client3);
+        token.approve(address(vault), DEPOSIT_AMOUNT);
+        vault.deposit(address(token), DEPOSIT_AMOUNT, client3);
+        vm.stopPrank();
+
+        // Initiate total withdrawals for all 3 clients
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client);
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client2);
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client3);
+
+        // Verify all clients have pending withdrawals with correct status
+        {
+            (, Vault.WithdrawalStatus status1,) = vault.withdrawalStates(address(token), client);
+            (, Vault.WithdrawalStatus status2,) = vault.withdrawalStates(address(token), client2);
+            (, Vault.WithdrawalStatus status3,) = vault.withdrawalStates(address(token), client3);
+            assertTrue(status1 == Vault.WithdrawalStatus.Initiated);
+            assertTrue(status2 == Vault.WithdrawalStatus.Initiated);
+            assertTrue(status3 == Vault.WithdrawalStatus.Initiated);
+        }
+
+        // Verify cached balances
+        {
+            (, , uint256 cachedBalance1) = vault.withdrawalStates(address(token), client);
+            (, , uint256 cachedBalance2) = vault.withdrawalStates(address(token), client2);
+            (, , uint256 cachedBalance3) = vault.withdrawalStates(address(token), client3);
+            assertEq(cachedBalance1, DEPOSIT_AMOUNT);
+            assertEq(cachedBalance2, DEPOSIT_AMOUNT);
+            assertEq(cachedBalance3, DEPOSIT_AMOUNT);
+        }
+
+        // Perform emergency withdraw (while all have pending total withdrawals)
+        vm.prank(owner);
+        vault.emergencyWithdraw(DEPOSIT_AMOUNT / 2);
+
+        // Verify withdrawal states remain valid after emergency withdraw
+        {
+            (, Vault.WithdrawalStatus afterStatus1, uint256 afterBalance1) = vault.withdrawalStates(address(token), client);
+            assertTrue(afterStatus1 == Vault.WithdrawalStatus.Initiated);
+            assertEq(afterBalance1, DEPOSIT_AMOUNT);
+        }
+        {
+            (, Vault.WithdrawalStatus afterStatus2, uint256 afterBalance2) = vault.withdrawalStates(address(token), client2);
+            assertTrue(afterStatus2 == Vault.WithdrawalStatus.Initiated);
+            assertEq(afterBalance2, DEPOSIT_AMOUNT);
+        }
+        {
+            (, Vault.WithdrawalStatus afterStatus3, uint256 afterBalance3) = vault.withdrawalStates(address(token), client3);
+            assertTrue(afterStatus3 == Vault.WithdrawalStatus.Initiated);
+            assertEq(afterBalance3, DEPOSIT_AMOUNT);
+        }
+
+        // Complete all clients' total withdrawals
+        vm.warp(block.timestamp + WAITING_PERIOD + 1);
+
+        // Execute all withdrawals
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client);
+        assertEq(vault.balanceOf(address(token), client), 0);
+
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client2);
+        assertEq(vault.balanceOf(address(token), client2), 0);
+
+        vm.prank(owner);
+        vault.totalWithdrawal(address(token), client3);
+        assertEq(vault.balanceOf(address(token), client3), 0);
+
+        // Verify all withdrawal states reset (no corruption)
+        {
+            (, Vault.WithdrawalStatus finalStatus1,) = vault.withdrawalStates(address(token), client);
+            (, Vault.WithdrawalStatus finalStatus2,) = vault.withdrawalStates(address(token), client2);
+            (, Vault.WithdrawalStatus finalStatus3,) = vault.withdrawalStates(address(token), client3);
+            assertTrue(finalStatus1 == Vault.WithdrawalStatus.None);
+            assertTrue(finalStatus2 == Vault.WithdrawalStatus.None);
+            assertTrue(finalStatus3 == Vault.WithdrawalStatus.None);
+        }
+    }
 }
