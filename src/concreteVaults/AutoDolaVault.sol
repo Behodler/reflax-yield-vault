@@ -364,7 +364,7 @@ contract AutoDolaVault is Vault {
         require(amount <= currentBalance, "AutoDolaVault: insufficient balance");
 
         // Calculate the proportional amount of shares to withdraw
-        uint256 totalShares = autoDolaVault.balanceOf(address(this));
+        uint256 totalShares = mainRewarder.balanceOf(address(this));
         require(totalShares > 0, "AutoDolaVault: no shares available");
 
         // Calculate client's current proportional share
