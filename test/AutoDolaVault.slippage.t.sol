@@ -139,7 +139,7 @@ contract AutoDolaVaultSlippage is Test {
         // This triggers line 243 protection because assetsReceived (720e18) < amount (800e18)
         vm.prank(client1);
         vm.expectRevert("AutoDolaVault: insufficient assets received");
-        vault.withdraw(address(dolaToken), balanceAfterLoss, recipient1);
+        vault.withdraw(address(dolaToken), balanceAfterLoss, client1);
 
         // Disable slippage for subsequent operations
         // (Note: expectRevert rolls back state, so slippage is still enabled)
@@ -147,19 +147,19 @@ contract AutoDolaVaultSlippage is Test {
 
         // Now withdraw should work normally without slippage
         uint256 safeWithdrawAmount = balanceAfterLoss;
-        _withdraw(client1, safeWithdrawAmount, recipient1);
+        _withdraw(client1, safeWithdrawAmount, client1);
 
         // After successful withdrawal, balance should be near zero
         assertLe(vault.balanceOf(address(dolaToken), client1), 1e15, "Balance should be nearly zero after successful withdrawal");
-        assertApproxEqRel(dolaToken.balanceOf(recipient1), safeWithdrawAmount, 1e14, "Recipient should receive the safe amount");
+        assertApproxEqRel(dolaToken.balanceOf(client1), safeWithdrawAmount, 1e14, "Recipient should receive the safe amount");
 
         // Additional verification: The line 243 check prevents scenarios where
         // the autoDOLA vault would return less than requested
         // Our MockAutoDOLA honors the conversion correctly, so this protection ensures
         // that in production, any discrepancy would be caught and reverted
         uint256 client2Balance = vault.balanceOf(address(dolaToken), client2);
-        _withdraw(client2, client2Balance, recipient2);
-        assertApproxEqRel(dolaToken.balanceOf(recipient2), client2Balance, 1e14, "Client2 should receive expected amount");
+        _withdraw(client2, client2Balance, client2);
+        assertApproxEqRel(dolaToken.balanceOf(client2), client2Balance, 1e14, "Client2 should receive expected amount");
     }
 
     // ============ NEGATIVE YIELD TESTS ============
@@ -194,7 +194,7 @@ contract AutoDolaVaultSlippage is Test {
         // Scenario 2: Verify withdrawals work with reduced balances
         {
             uint256 client1Balance = vault.balanceOf(address(dolaToken), client1);
-            _withdraw(client1, client1Balance / 2, recipient1);
+            _withdraw(client1, client1Balance / 2, client1);
             assertApproxEqRel(
                 vault.balanceOf(address(dolaToken), client1),
                 client1Balance / 2,
@@ -218,9 +218,9 @@ contract AutoDolaVaultSlippage is Test {
         );
 
         // Scenario 4: Verify all clients can still withdraw their remaining balances
-        _withdraw(client1, vault.balanceOf(address(dolaToken), client1), recipient1);
-        _withdraw(client2, vault.balanceOf(address(dolaToken), client2), recipient2);
-        _withdraw(client3, vault.balanceOf(address(dolaToken), client3), recipient3);
+        _withdraw(client1, vault.balanceOf(address(dolaToken), client1), client1);
+        _withdraw(client2, vault.balanceOf(address(dolaToken), client2), client2);
+        _withdraw(client3, vault.balanceOf(address(dolaToken), client3), client3);
 
         // Verify all balances are near zero
         assertLe(vault.balanceOf(address(dolaToken), client1), 1e15, "Client1 should have near-zero balance");
@@ -228,9 +228,9 @@ contract AutoDolaVaultSlippage is Test {
         assertLe(vault.balanceOf(address(dolaToken), client3), 1e15, "Client3 should have near-zero balance");
 
         // Verify total withdrawn matches remaining value (losses are reflected)
-        uint256 totalWithdrawn = dolaToken.balanceOf(recipient1) +
-                                 dolaToken.balanceOf(recipient2) +
-                                 dolaToken.balanceOf(recipient3);
+        uint256 totalWithdrawn = dolaToken.balanceOf(client1) +
+                                 dolaToken.balanceOf(client2) +
+                                 dolaToken.balanceOf(client3);
 
         // Total withdrawn should be significantly less than deposited due to losses
         assertLt(totalWithdrawn, 6000e18, "Total withdrawn should be less than deposited due to losses");
@@ -279,7 +279,7 @@ contract AutoDolaVaultSlippage is Test {
         // This should revert with "no shares to withdraw" error
         vm.prank(client2);
         vm.expectRevert("AutoDolaVault: no shares to withdraw");
-        vault.withdraw(address(dolaToken), tinyWithdraw, recipient2);
+        vault.withdraw(address(dolaToken), tinyWithdraw, client2);
 
         // Verify client2's balance is unchanged
         uint256 balanceAfterFailedWithdraw = vault.balanceOf(address(dolaToken), client2);
@@ -289,7 +289,7 @@ contract AutoDolaVaultSlippage is Test {
         // Withdraw a more substantial amount (1% of balance)
         uint256 largerWithdraw = client2Balance / 100;
         if (largerWithdraw > 1000) { // Ensure it's large enough to not round to zero
-            _withdraw(client2, largerWithdraw, recipient2);
+            _withdraw(client2, largerWithdraw, client2);
 
             // Should succeed and reduce balance appropriately
             assertApproxEqRel(
@@ -302,7 +302,7 @@ contract AutoDolaVaultSlippage is Test {
 
         // Verify the full balance can still be withdrawn
         uint256 remainingBalance = vault.balanceOf(address(dolaToken), client2);
-        _withdraw(client2, remainingBalance, recipient2);
+        _withdraw(client2, remainingBalance, client2);
         assertLe(vault.balanceOf(address(dolaToken), client2), 1e15, "Balance should be near zero after full withdrawal");
     }
 }

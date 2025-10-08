@@ -202,14 +202,14 @@ contract VaultIntegrationTest is Test {
             uint256 client1RemainingBalance = vault.balanceOf(address(dolaToken), client1);
             assertGt(client1RemainingBalance, 0, "Client1 should have remaining balance");
 
-            _withdraw(client1, client1RemainingBalance, user1);
+            _withdraw(client1, client1RemainingBalance, client1);
             assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Client1 balance should be zero after final withdrawal");
         }
 
         {
             // Client2 withdraws remaining balance
             uint256 client2RemainingBalance = vault.balanceOf(address(dolaToken), client2);
-            _withdraw(client2, client2RemainingBalance, user2);
+            _withdraw(client2, client2RemainingBalance, client2);
             assertEq(vault.balanceOf(address(dolaToken), client2), 0, "Client2 balance should be zero");
         }
 
@@ -218,7 +218,7 @@ contract VaultIntegrationTest is Test {
             uint256 client3FinalBalance = vault.balanceOf(address(dolaToken), client3);
             assertGt(client3FinalBalance, deposit3, "Client3 should have earned yield");
 
-            _withdraw(client3, client3FinalBalance, user3);
+            _withdraw(client3, client3FinalBalance, client3);
             assertEq(vault.balanceOf(address(dolaToken), client3), 0, "Client3 balance should be zero");
         }
 
@@ -229,7 +229,7 @@ contract VaultIntegrationTest is Test {
         assertEq(vault.getTotalShares(), 0, "Total shares should be zero after all withdrawals");
 
         // Verify users received their deposits + yield (approximately)
-        uint256 totalWithdrawn = dolaToken.balanceOf(user1) + dolaToken.balanceOf(user2) + dolaToken.balanceOf(user3);
+        uint256 totalWithdrawn = dolaToken.balanceOf(client1) + dolaToken.balanceOf(client2) + dolaToken.balanceOf(client3);
         assertGt(totalWithdrawn, totalDeposited, "Total withdrawn should exceed deposits (due to yield)");
     }
 
@@ -316,7 +316,7 @@ contract VaultIntegrationTest is Test {
 
         // Client1 withdraws some funds
         uint256 withdrawAmount = 10_000e18;
-        _withdraw(client1, withdrawAmount, user1);
+        _withdraw(client1, withdrawAmount, client1);
 
         // Verify rewards are unaffected by withdrawal
         assertEq(vault.getTokeRewards(), newRewards, "Withdrawal should not affect reward balance");
@@ -460,9 +460,9 @@ contract VaultIntegrationTest is Test {
         // ============ PHASE 7: COMPLETE WITHDRAWAL OF ALL CLIENTS ============
 
         // Final cleanup - all clients withdraw everything
-        _withdraw(client1, vault.balanceOf(address(dolaToken), client1), user1);
-        _withdraw(client2, vault.balanceOf(address(dolaToken), client2), user2);
-        _withdraw(client3, vault.balanceOf(address(dolaToken), client3), user3);
+        _withdraw(client1, vault.balanceOf(address(dolaToken), client1), client1);
+        _withdraw(client2, vault.balanceOf(address(dolaToken), client2), client2);
+        _withdraw(client3, vault.balanceOf(address(dolaToken), client3), client3);
 
         // Verify complete cleanup
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Client1 should have zero balance");
@@ -472,9 +472,9 @@ contract VaultIntegrationTest is Test {
         assertEq(vault.getTotalShares(), 0, "Total shares should be zero");
 
         // Verify users received their funds (user1, user2, user3 are just withdrawal recipients)
-        assertGt(dolaToken.balanceOf(user1), baseDeposit, "User1 should have received deposits + yield");
-        assertGt(dolaToken.balanceOf(user2), baseDeposit * 2, "User2 should have received deposits + yield");
-        assertGt(dolaToken.balanceOf(user3), baseDeposit * 3 + 5_000e18, "User3 should have received deposits + yield");
+        assertGt(dolaToken.balanceOf(client1), baseDeposit, "User1 should have received deposits + yield");
+        assertGt(dolaToken.balanceOf(client2), baseDeposit * 2, "User2 should have received deposits + yield");
+        assertGt(dolaToken.balanceOf(client3), baseDeposit * 3 + 5_000e18, "User3 should have received deposits + yield");
     }
 }
 

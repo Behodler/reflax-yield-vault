@@ -118,8 +118,8 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
         assertEq(vault.getTotalDeposited(address(dolaToken)), depositAmount, "Total deposited should match deposit");
 
         // Test 1: Successful 100% withdrawal
-        uint256 recipientBalanceBefore = dolaToken.balanceOf(recipient1);
-        _withdraw(client1, initialBalance, recipient1);
+        uint256 recipientBalanceBefore = dolaToken.balanceOf(client1);
+        _withdraw(client1, initialBalance, client1);
 
         // Verify totalDeposited becomes zero after withdrawal
         assertEq(vault.getTotalDeposited(address(dolaToken)), 0, "Total deposited should be zero after full withdrawal");
@@ -127,7 +127,7 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
         // Verify all balances are zero after full withdrawal
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "User balance should be zero after full withdrawal");
         assertApproxEqRel(
-            dolaToken.balanceOf(recipient1) - recipientBalanceBefore,
+            dolaToken.balanceOf(client1) - recipientBalanceBefore,
             initialBalance,
             1e14,
             "Recipient should receive full balance"
@@ -162,7 +162,7 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
         _deposit(client1, depositAmount, client1);
 
         uint256 balance = vault.balanceOf(address(dolaToken), client1);
-        _withdraw(client1, balance, recipient1);
+        _withdraw(client1, balance, client1);
 
         // Verify totalDeposited is zero
         assertEq(vault.getTotalDeposited(address(dolaToken)), 0, "Total deposited should be zero");
@@ -192,8 +192,8 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
         assertEq(totalBefore, 3000e18, "Total deposited should be sum of deposits");
 
         // Withdraw all from both users
-        _withdraw(client1, vault.balanceOf(address(dolaToken), client1), recipient1);
-        _withdraw(client2, vault.balanceOf(address(dolaToken), client2), recipient2);
+        _withdraw(client1, vault.balanceOf(address(dolaToken), client1), client1);
+        _withdraw(client2, vault.balanceOf(address(dolaToken), client2), client2);
 
         // Check state variable directly after last withdrawal
         assertEq(vault.getTotalDeposited(address(dolaToken)), 0, "Total deposited should be zero after all withdrawals");
@@ -227,11 +227,11 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
 
         // Client1 withdraws all
         uint256 balance1 = vault.balanceOf(address(dolaToken), client1);
-        _withdraw(client1, balance1, recipient1);
+        _withdraw(client1, balance1, client1);
 
         // Verify each withdrawal succeeds and balances update correctly
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Client1 balance should be zero");
-        assertApproxEqRel(dolaToken.balanceOf(recipient1), balance1, 1e14, "Recipient1 should receive full amount");
+        assertApproxEqRel(dolaToken.balanceOf(client1), balance1, 1e14, "Recipient1 should receive full amount");
 
         // Verify totalDeposited decreases with each withdrawal
         uint256 totalAfter1 = vault.getTotalDeposited(address(dolaToken));
@@ -239,20 +239,20 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
 
         // Client2 withdraws all
         uint256 balance2 = vault.balanceOf(address(dolaToken), client2);
-        _withdraw(client2, balance2, recipient2);
+        _withdraw(client2, balance2, client2);
 
         assertEq(vault.balanceOf(address(dolaToken), client2), 0, "Client2 balance should be zero");
-        assertApproxEqRel(dolaToken.balanceOf(recipient2), balance2, 1e14, "Recipient2 should receive full amount");
+        assertApproxEqRel(dolaToken.balanceOf(client2), balance2, 1e14, "Recipient2 should receive full amount");
 
         uint256 totalAfter2 = vault.getTotalDeposited(address(dolaToken));
         assertApproxEqRel(totalAfter2, deposit3, 1e15, "Total deposited should decrease after second withdrawal");
 
         // Client3 withdraws all
         uint256 balance3 = vault.balanceOf(address(dolaToken), client3);
-        _withdraw(client3, balance3, recipient3);
+        _withdraw(client3, balance3, client3);
 
         assertEq(vault.balanceOf(address(dolaToken), client3), 0, "Client3 balance should be zero");
-        assertApproxEqRel(dolaToken.balanceOf(recipient3), balance3, 1e14, "Recipient3 should receive full amount");
+        assertApproxEqRel(dolaToken.balanceOf(client3), balance3, 1e14, "Recipient3 should receive full amount");
 
         // Verify final totalDeposited = 0
         assertEq(vault.getTotalDeposited(address(dolaToken)), 0, "Total deposited should be zero after all withdrawals");
@@ -281,9 +281,9 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
         assertEq(totalInitial, 10000e18, "Total deposited should be 10000e18");
 
         // All but one user withdraw fully
-        _withdraw(client1, vault.balanceOf(address(dolaToken), client1), recipient1);
-        _withdraw(client2, vault.balanceOf(address(dolaToken), client2), recipient2);
-        _withdraw(client3, vault.balanceOf(address(dolaToken), client3), recipient3);
+        _withdraw(client1, vault.balanceOf(address(dolaToken), client1), client1);
+        _withdraw(client2, vault.balanceOf(address(dolaToken), client2), client2);
+        _withdraw(client3, vault.balanceOf(address(dolaToken), client3), client3);
 
         // Verify intermediate state
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Client1 should have zero balance");
@@ -294,8 +294,8 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
         assertGt(client4Balance, 0, "Client4 should still have balance");
 
         // Last user withdraws everything (should succeed completely)
-        uint256 recipientBalanceBefore = dolaToken.balanceOf(recipient4);
-        _withdraw(client4, client4Balance, recipient4);
+        uint256 recipientBalanceBefore = dolaToken.balanceOf(client4);
+        _withdraw(client4, client4Balance, client4);
 
         // Verify no dust remains
         assertEq(vault.balanceOf(address(dolaToken), client4), 0, "Client4 balance should be exactly zero (no dust)");
@@ -311,7 +311,7 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
 
         // Verify last user received their full balance
         assertApproxEqRel(
-            dolaToken.balanceOf(recipient4) - recipientBalanceBefore,
+            dolaToken.balanceOf(client4) - recipientBalanceBefore,
             client4Balance,
             1e14,
             "Last user should receive full balance with no loss"
@@ -340,12 +340,12 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
         assertGt(balanceWithYield, depositAmount, "Balance should increase due to yield");
 
         // Full withdrawal should work
-        _withdraw(client1, balanceWithYield, recipient1);
+        _withdraw(client1, balanceWithYield, client1);
 
         // Verify complete withdrawal
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Balance should be zero after full withdrawal");
         assertEq(vault.getTotalDeposited(address(dolaToken)), 0, "Total deposited should be zero");
-        assertApproxEqRel(dolaToken.balanceOf(recipient1), balanceWithYield, 1e14, "Should receive full balance with yield");
+        assertApproxEqRel(dolaToken.balanceOf(client1), balanceWithYield, 1e14, "Should receive full balance with yield");
     }
 
     /**
@@ -355,7 +355,7 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
     function testWithdrawWhenBalanceAlreadyZero() public {
         // Setup: deposit and fully withdraw
         _deposit(client1, 1000e18, client1);
-        _withdraw(client1, vault.balanceOf(address(dolaToken), client1), recipient1);
+        _withdraw(client1, vault.balanceOf(address(dolaToken), client1), client1);
 
         // Verify balance is zero
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Balance should be zero");
@@ -363,7 +363,7 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
         // Try to withdraw again - should revert
         vm.prank(client1);
         vm.expectRevert("AutoDolaVault: insufficient balance");
-        vault.withdraw(address(dolaToken), 1, recipient1);
+        vault.withdraw(address(dolaToken), 1, client1);
     }
 }
 

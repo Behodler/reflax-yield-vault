@@ -208,8 +208,8 @@ contract AutoDolaVaultRecipientTest is Test {
     }
 
     /**
-     * @notice Test that withdrawals use the caller's (msg.sender) balance, not a separate parameter
-     * @dev This verifies the withdrawal checks msg.sender's balance correctly
+     * @notice Test that withdrawals check the recipient's balance in the vault
+     * @dev This verifies the withdrawal checks recipient's balance correctly (bug fix from story 010)
      */
     function testAutoDolaWithdrawUsesCallerBalance() public {
         uint256 depositAmount = 1000e18;
@@ -224,19 +224,16 @@ contract AutoDolaVaultRecipientTest is Test {
         // Verify client1 has the balance
         assertEq(vault.balanceOf(address(dolaToken), client1), depositAmount);
 
-        // client1 withdraws using their own balance
-        uint256 bobDolaBalanceBefore = dolaToken.balanceOf(bob);
+        // client1 withdraws their balance to their own address (recipient = client1)
+        uint256 client1DolaBalanceBefore = dolaToken.balanceOf(client1);
         vm.prank(client1);
-        vault.withdraw(address(dolaToken), withdrawAmount, bob);
+        vault.withdraw(address(dolaToken), withdrawAmount, client1);
 
-        // ASSERTION: client1's balance is reduced (they're the caller/msg.sender)
+        // ASSERTION: client1's vault balance is reduced
         assertEq(vault.balanceOf(address(dolaToken), client1), depositAmount - withdrawAmount, "Caller's balance should be reduced");
 
-        // ASSERTION: bob (recipient) receives the DOLA
-        assertEq(dolaToken.balanceOf(bob), bobDolaBalanceBefore + withdrawAmount, "Recipient should receive DOLA");
-
-        // ASSERTION: bob should not have any vault balance (they were just the DOLA recipient)
-        assertEq(vault.balanceOf(address(dolaToken), bob), 0, "DOLA recipient should not have vault balance");
+        // ASSERTION: client1 (recipient) receives the DOLA
+        assertEq(dolaToken.balanceOf(client1), client1DolaBalanceBefore + withdrawAmount, "Recipient should receive DOLA");
     }
 
     /**
@@ -261,20 +258,20 @@ contract AutoDolaVaultRecipientTest is Test {
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Depositor should NOT have vault balance");
 
         // VERIFICATION PHASE 2: Withdrawal authorization
-        // client1 (who made the deposit) should NOT be able to withdraw client2's balance
+        // client1 (who made the deposit) should NOT be able to withdraw because they have no balance
         vm.expectRevert("AutoDolaVault: insufficient balance");
         vm.prank(client1);
-        vault.withdraw(address(dolaToken), withdrawAmount, alice);
+        vault.withdraw(address(dolaToken), withdrawAmount, client1);
 
         // VERIFICATION PHASE 3: Only the recipient can withdraw
-        // client2 (recipient) SHOULD be able to withdraw their balance
-        uint256 aliceDolaBalanceBefore = dolaToken.balanceOf(alice);
+        // client2 (recipient) SHOULD be able to withdraw their balance to themselves
+        uint256 client2DolaBalanceBefore = dolaToken.balanceOf(client2);
         vm.prank(client2);
-        vault.withdraw(address(dolaToken), withdrawAmount, alice);
+        vault.withdraw(address(dolaToken), withdrawAmount, client2);
 
         // Verify the withdrawal succeeded
         assertEq(vault.balanceOf(address(dolaToken), client2), depositAmount - withdrawAmount, "Recipient balance reduced");
-        assertEq(dolaToken.balanceOf(alice), aliceDolaBalanceBefore + withdrawAmount, "Withdrawal recipient got DOLA");
+        assertEq(dolaToken.balanceOf(client2), client2DolaBalanceBefore + withdrawAmount, "Withdrawal recipient got DOLA");
 
         // VERIFICATION PHASE 4: Final state
         // client1 still has no balance
@@ -315,9 +312,9 @@ contract AutoDolaVaultRecipientTest is Test {
         vm.prank(owner);
         vault.setClient(bob, true);
 
-        // bob can withdraw the full amount
+        // bob can withdraw the full amount to himself
         vm.prank(bob);
-        vault.withdraw(address(dolaToken), deposit1 + deposit2, alice);
+        vault.withdraw(address(dolaToken), deposit1 + deposit2, bob);
 
         assertEq(vault.balanceOf(address(dolaToken), bob), 0, "Bob's balance should be zero after full withdrawal");
     }
@@ -450,19 +447,19 @@ contract AutoDolaVaultRecipientTest is Test {
         vm.prank(owner);
         vault.setClient(bob, true);
 
-        // Bob withdraws part of the accumulated balance
-        uint256 aliceDolaBalanceBefore = dolaToken.balanceOf(alice);
+        // Bob withdraws part of the accumulated balance to himself
+        uint256 bobDolaBalanceBefore = dolaToken.balanceOf(bob);
         vm.prank(bob);
-        vault.withdraw(address(dolaToken), withdrawAmount, alice);
+        vault.withdraw(address(dolaToken), withdrawAmount, bob);
 
         // Verify withdrawal succeeded
         uint256 remainingBalance = totalDeposited - withdrawAmount;
         assertEq(vault.balanceOf(address(dolaToken), bob), remainingBalance, "Bob's balance should be reduced by withdrawal amount");
-        assertEq(dolaToken.balanceOf(alice), aliceDolaBalanceBefore + withdrawAmount, "Alice should receive withdrawn DOLA");
+        assertEq(dolaToken.balanceOf(bob), bobDolaBalanceBefore + withdrawAmount, "Bob should receive withdrawn DOLA");
 
         // Bob withdraws remaining balance
         vm.prank(bob);
-        vault.withdraw(address(dolaToken), remainingBalance, alice);
+        vault.withdraw(address(dolaToken), remainingBalance, bob);
 
         // Verify complete withdrawal
         assertEq(vault.balanceOf(address(dolaToken), bob), 0, "Bob should have zero balance after full withdrawal");

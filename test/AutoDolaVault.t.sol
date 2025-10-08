@@ -270,15 +270,15 @@ contract AutoDolaVaultTest is Test {
 
         // Get initial balances
         uint256 initialUserBalance = vault.balanceOf(address(dolaToken), client1);
-        uint256 initialRecipientDola = dolaToken.balanceOf(user2);
+        uint256 initialRecipientDola = dolaToken.balanceOf(client1);
 
-        // Perform withdrawal - client1 withdraws their own balance
+        // Perform withdrawal - client1 withdraws their own balance to themselves
         vm.prank(client1);
-        vault.withdraw(address(dolaToken), withdrawAmount, user2);
+        vault.withdraw(address(dolaToken), withdrawAmount, client1);
 
         // Verify balances
         uint256 finalUserBalance = vault.balanceOf(address(dolaToken), client1);
-        uint256 finalRecipientDola = dolaToken.balanceOf(user2);
+        uint256 finalRecipientDola = dolaToken.balanceOf(client1);
 
         assertEq(finalUserBalance, initialUserBalance - withdrawAmount);
         assertEq(finalRecipientDola, initialRecipientDola + withdrawAmount);
@@ -491,16 +491,13 @@ contract AutoDolaVaultTest is Test {
         // But vault still has shares (just not staked)
         assertGt(autoDolaVault.balanceOf(address(vault)), 0, "Vault should still have autoDOLA shares");
 
-        // Emergency withdraw should still work (skip unstaking, go straight to redeem)
+        // After bug fix: Emergency withdraw requires staked shares > 0
+        // This scenario (manually unstaking all shares) should now revert
         uint256 withdrawAmount = 500e18;
-        uint256 ownerBalanceBefore = dolaToken.balanceOf(owner);
 
         vm.prank(owner);
+        vm.expectRevert("AutoDolaVault: no shares to withdraw");
         vault.emergencyWithdraw(withdrawAmount);
-
-        // Should succeed and transfer funds
-        uint256 ownerBalanceAfter = dolaToken.balanceOf(owner);
-        assertApproxEqAbs(ownerBalanceAfter, ownerBalanceBefore + withdrawAmount, 1, "Emergency withdraw should work even with zero staked shares");
     }
 
     /**
@@ -635,7 +632,7 @@ contract AutoDolaVaultTest is Test {
         // Note: The actual claim happens when mainRewarder.withdraw is called with claim=true
         // For this test, we need to verify the mock behavior works correctly
         vm.prank(client1);
-        vault.withdraw(address(dolaToken), withdrawAmount, user2);
+        vault.withdraw(address(dolaToken), withdrawAmount, client1);
 
         // Note: AutoDolaVault currently calls withdraw with claim=false
         // This test verifies the mock implementation works correctly when claim=true
@@ -1236,13 +1233,13 @@ contract AutoDolaVaultTest is Test {
         uint256 clientBalance = vault.balanceOf(address(dolaToken), client1);
         assertApproxEqAbs(clientBalance, oneWei, 1, "Client balance should be approximately 1 wei within 1 wei tolerance");
 
-        // Withdraw the 1 wei - client1 withdraws their own balance
-        uint256 recipientBalanceBefore = dolaToken.balanceOf(user2);
+        // Withdraw the 1 wei - client1 withdraws their own balance to themselves
+        uint256 recipientBalanceBefore = dolaToken.balanceOf(client1);
         vm.prank(client1);
-        vault.withdraw(address(dolaToken), oneWei, user2);
+        vault.withdraw(address(dolaToken), oneWei, client1);
 
         // Verify withdrawal succeeded
-        uint256 recipientBalanceAfter = dolaToken.balanceOf(user2);
+        uint256 recipientBalanceAfter = dolaToken.balanceOf(client1);
         uint256 amountReceived = recipientBalanceAfter - recipientBalanceBefore;
 
         // With 1 wei operations, we allow 1 wei tolerance for rounding
@@ -1289,12 +1286,12 @@ contract AutoDolaVaultTest is Test {
 
         // Test withdrawal to ensure accounting remains accurate
         uint256 withdrawAmount = totalExpected / 2; // Withdraw half
-        uint256 recipientBalanceBefore = dolaToken.balanceOf(user2);
+        uint256 recipientBalanceBefore = dolaToken.balanceOf(client1);
 
         vm.prank(client1);
-        vault.withdraw(address(dolaToken), withdrawAmount, user2);
+        vault.withdraw(address(dolaToken), withdrawAmount, client1);
 
-        uint256 recipientBalanceAfter = dolaToken.balanceOf(user2);
+        uint256 recipientBalanceAfter = dolaToken.balanceOf(client1);
         uint256 actualWithdrawn = recipientBalanceAfter - recipientBalanceBefore;
 
         // Verify withdrawal amount is accurate
@@ -1319,11 +1316,11 @@ contract AutoDolaVaultTest is Test {
         // Use a prime number that's likely to create rounding issues
         uint256 withdrawAmount = depositAmount / 3; // 333.333... DOLA
 
-        uint256 recipientBalanceBefore = dolaToken.balanceOf(user2);
+        uint256 recipientBalanceBefore = dolaToken.balanceOf(client1);
         vm.prank(client1);
-        vault.withdraw(address(dolaToken), withdrawAmount, user2);
+        vault.withdraw(address(dolaToken), withdrawAmount, client1);
 
-        uint256 recipientBalanceAfter = dolaToken.balanceOf(user2);
+        uint256 recipientBalanceAfter = dolaToken.balanceOf(client1);
         uint256 actualWithdrawn = recipientBalanceAfter - recipientBalanceBefore;
 
         // Verify withdrawal succeeded with reasonable precision
@@ -1343,11 +1340,11 @@ contract AutoDolaVaultTest is Test {
         // Test second withdrawal to verify dust handling continues to work
         uint256 secondWithdrawAmount = remainingBalance / 2;
 
-        recipientBalanceBefore = dolaToken.balanceOf(user2);
+        recipientBalanceBefore = dolaToken.balanceOf(client1);
         vm.prank(client1);
-        vault.withdraw(address(dolaToken), secondWithdrawAmount, user2);
+        vault.withdraw(address(dolaToken), secondWithdrawAmount, client1);
 
-        recipientBalanceAfter = dolaToken.balanceOf(user2);
+        recipientBalanceAfter = dolaToken.balanceOf(client1);
         uint256 secondActualWithdrawn = recipientBalanceAfter - recipientBalanceBefore;
 
         // Verify second withdrawal also accurate
@@ -1447,7 +1444,7 @@ contract AutoDolaVaultTest is Test {
             // Only withdraw if balance is sufficient
             if (balanceBefore > 1e15) {
                 vm.prank(client2);
-                vault.withdraw(address(dolaToken), 1e15, user2); // 0.001 DOLA
+                vault.withdraw(address(dolaToken), 1e15, client2); // 0.001 DOLA
 
                 // Verify tiny withdrawal succeeded
                 assertLt(vault.balanceOf(address(dolaToken), client2), balanceBefore, "Small withdrawal should reduce balance");
@@ -1561,7 +1558,7 @@ contract AutoDolaVaultTest is Test {
 
         // Withdraw all funds to return to zero stake
         vm.prank(client1);
-        vault.withdraw(address(dolaToken), depositAmount, user2);
+        vault.withdraw(address(dolaToken), depositAmount, client1);
 
         // Verify no shares are staked again
         uint256 stakedAfterWithdraw = mainRewarder.balanceOf(address(vault));

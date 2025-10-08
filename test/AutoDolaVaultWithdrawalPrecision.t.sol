@@ -103,27 +103,27 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
         uint256 balanceBefore = vault.balanceOf(address(dolaToken), client1);
         assertEq(balanceBefore, 1, "Initial balance should be 1 wei");
 
-        _withdraw(client1, 1, recipient1);
+        _withdraw(client1, 1, client1);
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Balance should be 0 after 1 wei withdrawal");
-        assertEq(dolaToken.balanceOf(recipient1), 1, "Recipient should receive 1 wei");
+        assertEq(dolaToken.balanceOf(client1), 1, "Recipient should receive 1 wei");
 
         // Test 10 wei withdrawal - client2 deposits to self and withdraws
         _deposit(client2, 10, client2);
         balanceBefore = vault.balanceOf(address(dolaToken), client2);
         assertEq(balanceBefore, 10, "Initial balance should be 10 wei");
 
-        _withdraw(client2, 10, recipient2);
+        _withdraw(client2, 10, client2);
         assertEq(vault.balanceOf(address(dolaToken), client2), 0, "Balance should be 0 after 10 wei withdrawal");
-        assertEq(dolaToken.balanceOf(recipient2), 10, "Recipient should receive 10 wei");
+        assertEq(dolaToken.balanceOf(client2), 10, "Recipient should receive 10 wei");
 
         // Test 100 wei withdrawal - client3 deposits to self and withdraws
         _deposit(client3, 100, client3);
         balanceBefore = vault.balanceOf(address(dolaToken), client3);
         assertEq(balanceBefore, 100, "Initial balance should be 100 wei");
 
-        _withdraw(client3, 100, recipient3);
+        _withdraw(client3, 100, client3);
         assertEq(vault.balanceOf(address(dolaToken), client3), 0, "Balance should be 0 after 100 wei withdrawal");
-        assertEq(dolaToken.balanceOf(recipient3), 100, "Recipient should receive 100 wei");
+        assertEq(dolaToken.balanceOf(client3), 100, "Recipient should receive 100 wei");
     }
 
     // ============ PRECISION TESTS - LARGE VALUES ============
@@ -141,9 +141,9 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
         uint256 balanceBefore = vault.balanceOf(address(dolaToken), client1);
         assertEq(balanceBefore, largeAmount1, "Initial balance should be 1e30");
 
-        _withdraw(client1, largeAmount1, recipient1);
+        _withdraw(client1, largeAmount1, client1);
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Balance should be 0 after 1e30 withdrawal");
-        assertEq(dolaToken.balanceOf(recipient1), largeAmount1, "Recipient should receive 1e30");
+        assertEq(dolaToken.balanceOf(client1), largeAmount1, "Recipient should receive 1e30");
 
         // Test 1e36 withdrawal (maximum practical value without overflow in multiplication)
         // This is 1 quintillion tokens with 18 decimals
@@ -152,20 +152,20 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
         balanceBefore = vault.balanceOf(address(dolaToken), client2);
         assertEq(balanceBefore, largeAmount2, "Initial balance should be 1e36");
 
-        _withdraw(client2, largeAmount2, recipient2);
+        _withdraw(client2, largeAmount2, client2);
         assertEq(vault.balanceOf(address(dolaToken), client2), 0, "Balance should be 0 after 1e36 withdrawal");
-        assertEq(dolaToken.balanceOf(recipient2), largeAmount2, "Recipient should receive 1e36");
+        assertEq(dolaToken.balanceOf(client2), largeAmount2, "Recipient should receive 1e36");
 
         // Test partial withdrawal at 1e36 scale
         uint256 largeAmount3 = 1e36;
         _deposit(client3, largeAmount3, client3);
         uint256 withdrawAmount = largeAmount3 / 2;
 
-        _withdraw(client3, withdrawAmount, recipient3);
+        _withdraw(client3, withdrawAmount, client3);
         // Allow for minimal rounding error at extreme scales
         uint256 remainingBalance = vault.balanceOf(address(dolaToken), client3);
         assertApproxEqRel(remainingBalance, withdrawAmount, 1e16, "Remaining balance should be approximately half");
-        assertApproxEqRel(dolaToken.balanceOf(recipient3), withdrawAmount, 1e16, "Recipient should receive approximately half");
+        assertApproxEqRel(dolaToken.balanceOf(client3), withdrawAmount, 1e16, "Recipient should receive approximately half");
     }
 
     // ============ BALANCE REDUCTION ACCURACY TESTS ============
@@ -183,7 +183,7 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
         uint256 withdrawAmount = 400e18;
         uint256 balanceBefore = vault.balanceOf(address(dolaToken), client1);
 
-        _withdraw(client1, withdrawAmount, recipient1);
+        _withdraw(client1, withdrawAmount, client1);
 
         uint256 balanceAfter = vault.balanceOf(address(dolaToken), client1);
         uint256 expectedRemaining = depositAmount - withdrawAmount;
@@ -204,7 +204,7 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
 
         // Withdraw half of the yielded balance
         withdrawAmount = balanceBefore / 2;
-        _withdraw(client2, withdrawAmount, recipient2);
+        _withdraw(client2, withdrawAmount, client2);
 
         balanceAfter = vault.balanceOf(address(dolaToken), client2);
         // Balance reduction should be proportional to the withdrawal amount
@@ -215,17 +215,17 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
         uint256 currentBalance = vault.balanceOf(address(dolaToken), client3);
 
         // First withdrawal: 25%
-        _withdraw(client3, currentBalance / 4, recipient3);
+        _withdraw(client3, currentBalance / 4, client3);
         uint256 balance1 = vault.balanceOf(address(dolaToken), client3);
         assertApproxEqRel(balance1, currentBalance * 3 / 4, 1e15, "After 25% withdrawal, 75% should remain");
 
         // Second withdrawal: 33% of remaining
-        _withdraw(client3, balance1 / 3, recipient3);
+        _withdraw(client3, balance1 / 3, client3);
         uint256 balance2 = vault.balanceOf(address(dolaToken), client3);
         assertApproxEqRel(balance2, balance1 * 2 / 3, 1e15, "After 33% withdrawal, 67% of previous should remain");
 
         // Third withdrawal: 50% of remaining
-        _withdraw(client3, balance2 / 2, recipient3);
+        _withdraw(client3, balance2 / 2, client3);
         uint256 balance3 = vault.balanceOf(address(dolaToken), client3);
         assertApproxEqRel(balance3, balance2 / 2, 1e15, "After 50% withdrawal, 50% of previous should remain");
     }
@@ -256,7 +256,7 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
             uint256 withdrawAmount = withdrawAmounts[i];
             uint256 balanceBefore = vault.balanceOf(address(dolaToken), client1);
 
-            _withdraw(client1, withdrawAmount, recipient1);
+            _withdraw(client1, withdrawAmount, client1);
 
             uint256 balanceAfter = vault.balanceOf(address(dolaToken), client1);
             expectedBalance -= withdrawAmount;
@@ -327,7 +327,7 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
         // Additional test: Verify normal withdrawal still works for client1
         uint256 client1Balance = vault.balanceOf(address(dolaToken), client1);
         uint256 normalWithdraw = client1Balance / 4; // Withdraw 25% to avoid potential rounding issues
-        _withdraw(client1, normalWithdraw, recipient1);
+        _withdraw(client1, normalWithdraw, client1);
         assertApproxEqRel(
             vault.balanceOf(address(dolaToken), client1),
             client1Balance - normalWithdraw,
@@ -374,21 +374,21 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
 
         // Phase 3: Client1 withdraws 25%
         uint256 client1Withdraw = client1Balance2 / 4;
-        _withdraw(client1, client1Withdraw, recipient1);
+        _withdraw(client1, client1Withdraw, client1);
 
         uint256 client1Balance3 = vault.balanceOf(address(dolaToken), client1);
         assertApproxEqRel(client1Balance3, client1Balance2 * 3 / 4, 1e15, "Client1 should have 75% remaining");
 
         // Phase 4: Client2 withdraws 50%
         uint256 client2Withdraw = client2Balance2 / 2;
-        _withdraw(client2, client2Withdraw, recipient2);
+        _withdraw(client2, client2Withdraw, client2);
 
         uint256 client2Balance3 = vault.balanceOf(address(dolaToken), client2);
         assertApproxEqRel(client2Balance3, client2Balance2 / 2, 1e15, "Client2 should have 50% remaining");
 
         // Phase 5: Client3 withdraws 75%
         uint256 client3Withdraw = client3Balance2 * 3 / 4;
-        _withdraw(client3, client3Withdraw, recipient3);
+        _withdraw(client3, client3Withdraw, client3);
 
         uint256 client3Balance3 = vault.balanceOf(address(dolaToken), client3);
         assertApproxEqRel(client3Balance3, client3Balance2 / 4, 1e15, "Client3 should have 25% remaining");
@@ -401,13 +401,13 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
         assertApproxEqRel(totalBalance, totalAssets, 1e14, "Total client balances should match total vault assets");
 
         // Phase 7: All clients withdraw remaining balances
-        _withdraw(client1, client1Balance3, recipient1);
+        _withdraw(client1, client1Balance3, client1);
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "Client1 should have zero balance");
 
-        _withdraw(client2, client2Balance3, recipient2);
+        _withdraw(client2, client2Balance3, client2);
         assertEq(vault.balanceOf(address(dolaToken), client2), 0, "Client2 should have zero balance");
 
-        _withdraw(client3, client3Balance3, recipient3);
+        _withdraw(client3, client3Balance3, client3);
         assertEq(vault.balanceOf(address(dolaToken), client3), 0, "Client3 should have zero balance");
 
         // Final verification: Vault should be nearly empty
