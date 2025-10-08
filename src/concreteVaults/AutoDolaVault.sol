@@ -129,7 +129,7 @@ contract AutoDolaVault is Vault {
 
         // Calculate the current DOLA value using autoDOLA's conversion rate
         // This accounts for yield that has accumulated over time
-        uint256 totalShares = autoDolaVault.balanceOf(address(this));
+        uint256 totalShares = mainRewarder.balanceOf(address(this));
         if (totalShares == 0 || totalDeposited[token] == 0) {
             return storedBalance;
         }
@@ -214,16 +214,16 @@ contract AutoDolaVault is Vault {
         require(amount > 0, "AutoDolaVault: amount must be greater than zero");
         require(recipient != address(0), "AutoDolaVault: recipient cannot be zero address");
 
-        // Get current client balance (includes yield)
-        uint256 currentBalance = this.balanceOf(token, msg.sender);
+        // Get current recipient balance (includes yield)
+        uint256 currentBalance = this.balanceOf(token, recipient);
         require(amount <= currentBalance, "AutoDolaVault: insufficient balance");
 
         // Calculate the proportional amount of shares to withdraw
-        uint256 totalShares = autoDolaVault.balanceOf(address(this));
+        uint256 totalShares = mainRewarder.balanceOf(address(this));
         require(totalShares > 0, "AutoDolaVault: no shares available");
 
         // Calculate user's current proportional share
-        uint256 userStoredBalance = clientBalances[token][msg.sender];
+        uint256 userStoredBalance = clientBalances[token][recipient];
         uint256 userCurrentShares = (totalShares * userStoredBalance) / totalDeposited[token];
 
         // Calculate shares to withdraw based on requested amount vs current balance
@@ -244,7 +244,7 @@ contract AutoDolaVault is Vault {
 
         // Update client balance proportionally
         uint256 balanceReduction = (userStoredBalance * amount) / currentBalance;
-        clientBalances[token][msg.sender] -= balanceReduction;
+        clientBalances[token][recipient] -= balanceReduction;
         totalDeposited[token] -= balanceReduction;
 
         // Transfer DOLA to recipient
@@ -282,7 +282,7 @@ contract AutoDolaVault is Vault {
      * @dev Withdraws DOLA by unstaking and redeeming autoDOLA shares
      */
     function _emergencyWithdraw(uint256 amount) internal override {
-        uint256 totalShares = autoDolaVault.balanceOf(address(this));
+        uint256 totalShares = mainRewarder.balanceOf(address(this));
         require(totalShares > 0, "AutoDolaVault: no shares to withdraw");
 
         // Calculate how many shares needed for the requested DOLA amount
@@ -319,7 +319,7 @@ contract AutoDolaVault is Vault {
         require(amount > 0, "AutoDolaVault: amount must be greater than zero");
 
         // Calculate proportional shares to withdraw
-        uint256 totalShares = autoDolaVault.balanceOf(address(this));
+        uint256 totalShares = mainRewarder.balanceOf(address(this));
         if (totalShares == 0 || totalDeposited[token] == 0) {
             return; // Nothing to withdraw
         }
