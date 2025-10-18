@@ -9,12 +9,12 @@ import "../src/mocks/MockERC20.sol";
  * @title MockVaultForWithdrawer
  * @notice Mock vault implementation for testing withdrawer functionality
  */
-contract MockVaultForWithdrawer is Vault {
+contract MockVaultForWithdrawer is AYieldStrategy {
     using SafeERC20 for IERC20;
 
     mapping(address => mapping(address => uint256)) private balances;
 
-    constructor(address _owner) Vault(_owner) {}
+    constructor(address _owner) AYieldStrategy(_owner) {}
 
     function balanceOf(address token, address account) external view override returns (uint256) {
         return balances[token][account];
