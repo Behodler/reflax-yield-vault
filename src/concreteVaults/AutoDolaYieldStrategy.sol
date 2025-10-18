@@ -79,7 +79,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
     // ============ CONSTRUCTOR ============
 
     /**
-     * @notice Initialize the AutoDolaVault with required contract addresses
+     * @notice Initialize the AutoDolaYieldStrategy with required contract addresses
      * @param _owner The owner of the vault
      * @param _dolaToken The DOLA token address
      * @param _tokeToken The TOKE token address
