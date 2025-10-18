@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../../src/concreteVaults/AutoDolaVault.sol";
+import "../../src/concreteVaults/AutoDolaYieldStrategy.sol";
 import "../../src/mocks/MockERC20.sol";
 
 /**
@@ -12,7 +12,7 @@ import "../../src/mocks/MockERC20.sol";
  *      Uses high-fidelity mocks that simulate realistic behavior of autoDOLA and MainRewarder
  */
 contract VaultIntegrationTest is Test {
-    AutoDolaVault public vault;
+    AutoDolaYieldStrategy public vault;
     MockERC20 public dolaToken;
     MockERC20 public tokeToken;
     MockAutoDOLA public autoDolaVault;
@@ -60,7 +60,7 @@ contract VaultIntegrationTest is Test {
         autoDolaVault = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
 
         // Deploy the vault
-        vault = new AutoDolaVault(
+        vault = new AutoDolaYieldStrategy(
             owner,
             address(dolaToken),
             address(tokeToken),

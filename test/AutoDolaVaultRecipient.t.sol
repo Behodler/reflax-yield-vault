@@ -2,10 +2,10 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteVaults/AutoDolaVault.sol";
+import "../src/concreteVaults/AutoDolaYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
 
-// Mock contracts for testing (reusing from AutoDolaVault.t.sol)
+// Mock contracts for testing (reusing from AutoDolaYieldStrategy.t.sol)
 contract MockAutoDOLA is MockERC20 {
     mapping(address => uint256) private _balances;
     uint256 private _totalAssets;
@@ -133,7 +133,7 @@ contract MockMainRewarder {
  * @dev Addresses the critical tracking discrepancy identified in parent story 005's unit test quality review
  */
 contract AutoDolaVaultRecipientTest is Test {
-    AutoDolaVault vault;
+    AutoDolaYieldStrategy vault;
     MockERC20 dolaToken;
     MockERC20 tokeToken;
     MockAutoDOLA autoDolaVault;
@@ -161,7 +161,7 @@ contract AutoDolaVaultRecipientTest is Test {
 
         // Deploy the actual vault
         vm.prank(owner);
-        vault = new AutoDolaVault(
+        vault = new AutoDolaYieldStrategy(
             owner,
             address(dolaToken),
             address(tokeToken),
@@ -238,7 +238,7 @@ contract AutoDolaVaultRecipientTest is Test {
 
     /**
      * @notice Test the critical cross-client scenario: client1 deposits for client2, then client2 withdraws
-     * @dev This is the core test that addresses the MockVault vs AutoDolaVault tracking discrepancy
+     * @dev This is the core test that addresses the MockVault vs AutoDolaYieldStrategy tracking discrepancy
      */
     function testCrossClientDepositWithdrawal() public {
         uint256 depositAmount = 2000e18;
@@ -259,7 +259,7 @@ contract AutoDolaVaultRecipientTest is Test {
 
         // VERIFICATION PHASE 2: Withdrawal authorization
         // client1 (who made the deposit) should NOT be able to withdraw because they have no balance
-        vm.expectRevert("AutoDolaVault: insufficient balance");
+        vm.expectRevert("AutoDolaYieldStrategy: insufficient balance");
         vm.prank(client1);
         vault.withdraw(address(dolaToken), withdrawAmount, client1);
 

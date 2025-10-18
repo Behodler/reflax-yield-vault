@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteVaults/AutoDolaVault.sol";
+import "../src/concreteVaults/AutoDolaYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
 
 /**
@@ -11,7 +11,7 @@ import "../src/mocks/MockERC20.sol";
  * @dev Tests critical security features that prevent loss of user funds in adverse market conditions
  */
 contract AutoDolaVaultSlippage is Test {
-    AutoDolaVault public vault;
+    AutoDolaYieldStrategy public vault;
     MockERC20 public dolaToken;
     MockERC20 public tokeToken;
     MockAutoDOLA public autoDolaVault;
@@ -25,7 +25,7 @@ contract AutoDolaVaultSlippage is Test {
     address public recipient2 = address(6);
     address public recipient3 = address(7);
 
-    // Events from AutoDolaVault
+    // Events from AutoDolaYieldStrategy
     event DolaDeposited(
         address indexed token,
         address indexed client,
@@ -53,8 +53,8 @@ contract AutoDolaVaultSlippage is Test {
         // Deploy mock autoDOLA vault
         autoDolaVault = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
 
-        // Deploy AutoDolaVault
-        vault = new AutoDolaVault(
+        // Deploy AutoDolaYieldStrategy
+        vault = new AutoDolaYieldStrategy(
             owner,
             address(dolaToken),
             address(tokeToken),
@@ -101,7 +101,7 @@ contract AutoDolaVaultSlippage is Test {
 
     /**
      * @notice Test slippage protection activates when redemption is less than expected (line 243)
-     * @dev Validates: require(assetsReceived >= amount, "AutoDolaVault: insufficient assets received")
+     * @dev Validates: require(assetsReceived >= amount, "AutoDolaYieldStrategy: insufficient assets received")
      *      This is SECURITY-CRITICAL to prevent users from losing funds when autoDOLA redemption
      *      returns less than the requested withdrawal amount
      *
@@ -131,14 +131,14 @@ contract AutoDolaVaultSlippage is Test {
 
         // CRITICAL TEST: Test line 243 slippage protection
         // Enable slippage to simulate autoDOLA vault returning less than expected
-        // This tests the specific protection: require(assetsReceived >= amount, "AutoDolaVault: insufficient assets received")
+        // This tests the specific protection: require(assetsReceived >= amount, "AutoDolaYieldStrategy: insufficient assets received")
         autoDolaVault.enableSlippage(10); // 10% slippage
 
         // Try to withdraw balanceAfterLoss (~800e18)
         // Due to 10% slippage, autoDOLA will only return ~720e18 (90% of 800e18)
         // This triggers line 243 protection because assetsReceived (720e18) < amount (800e18)
         vm.prank(client1);
-        vm.expectRevert("AutoDolaVault: insufficient assets received");
+        vm.expectRevert("AutoDolaYieldStrategy: insufficient assets received");
         vault.withdraw(address(dolaToken), balanceAfterLoss, client1);
 
         // Disable slippage for subsequent operations
@@ -246,7 +246,7 @@ contract AutoDolaVaultSlippage is Test {
 
     /**
      * @notice Test withdrawal protection when shares calculation rounds to zero (line 231)
-     * @dev Validates: require(sharesToWithdraw > 0, "AutoDolaVault: no shares to withdraw")
+     * @dev Validates: require(sharesToWithdraw > 0, "AutoDolaYieldStrategy: no shares to withdraw")
      *      This prevents users from attempting withdrawals that would result in zero shares
      *
      *      Line 230 calculation: sharesToWithdraw = (userCurrentShares * amount) / currentBalance
@@ -278,7 +278,7 @@ contract AutoDolaVaultSlippage is Test {
 
         // This should revert with "no shares to withdraw" error
         vm.prank(client2);
-        vm.expectRevert("AutoDolaVault: no shares to withdraw");
+        vm.expectRevert("AutoDolaYieldStrategy: no shares to withdraw");
         vault.withdraw(address(dolaToken), tinyWithdraw, client2);
 
         // Verify client2's balance is unchanged

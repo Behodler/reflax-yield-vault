@@ -4,7 +4,7 @@ pragma solidity ^0.8.13;
 import "forge-std/Test.sol";
 import "../src/mocks/MockVault.sol";
 import "../src/mocks/MockERC20.sol";
-import "../src/Vault.sol";
+import "../src/AYieldStrategy.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**

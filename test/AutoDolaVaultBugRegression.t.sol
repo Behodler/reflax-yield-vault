@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteVaults/AutoDolaVault.sol";
+import "../src/concreteVaults/AutoDolaYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
 
 /**
@@ -16,7 +16,7 @@ import "../src/mocks/MockERC20.sol";
  * 3. _withdrawFrom Bug: _withdrawFrom() must also use mainRewarder.balanceOf()
  */
 contract AutoDolaVaultBugRegressionTest is Test {
-    AutoDolaVault public vault;
+    AutoDolaYieldStrategy public vault;
     MockERC20 public dolaToken;
     MockERC20 public tokeToken;
     MockAutoDOLA public autoDolaVault;
@@ -39,8 +39,8 @@ contract AutoDolaVaultBugRegressionTest is Test {
         // Deploy mock autoDOLA vault
         autoDolaVault = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
 
-        // Deploy AutoDolaVault
-        vault = new AutoDolaVault(
+        // Deploy AutoDolaYieldStrategy
+        vault = new AutoDolaYieldStrategy(
             owner,
             address(dolaToken),
             address(tokeToken),
@@ -310,7 +310,7 @@ contract AutoDolaVaultBugRegressionTest is Test {
         assertEq(vault.balanceOf(address(dolaToken), client1), 0, "client1 should not own any vault balance");
 
         // client1 should NOT be able to withdraw user1's balance
-        vm.expectRevert("AutoDolaVault: insufficient balance");
+        vm.expectRevert("AutoDolaYieldStrategy: insufficient balance");
         vm.prank(client1);
         vault.withdraw(address(dolaToken), withdrawAmount, client1);
 

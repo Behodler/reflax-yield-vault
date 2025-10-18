@@ -4,7 +4,7 @@ pragma solidity ^0.8.13;
 import "forge-std/Test.sol";
 import "../../src/SurplusTracker.sol";
 import "../../src/mocks/MockVault.sol";
-import "../../src/concreteVaults/AutoDolaVault.sol";
+import "../../src/concreteVaults/AutoDolaYieldStrategy.sol";
 import "../../src/mocks/MockERC20.sol";
 
 /**
@@ -101,7 +101,7 @@ contract MockMainRewarder {
 contract SurplusTrackerIntegrationTest is Test {
     SurplusTracker public tracker;
     MockVault public mockVault;
-    AutoDolaVault public autoDolaVault;
+    AutoDolaYieldStrategy public autoDolaVault;
 
     MockERC20 public dolaToken;
     MockERC20 public tokeToken;
@@ -133,8 +133,8 @@ contract SurplusTrackerIntegrationTest is Test {
         mockVault.setClient(client1, true);
         mockVault.setClient(client2, true);
 
-        // Deploy AutoDolaVault
-        autoDolaVault = new AutoDolaVault(
+        // Deploy AutoDolaYieldStrategy
+        autoDolaVault = new AutoDolaYieldStrategy(
             owner,
             address(dolaToken),
             address(tokeToken),
@@ -226,7 +226,7 @@ contract SurplusTrackerIntegrationTest is Test {
         );
 
         // Surplus should be the yield (approximately 100 DOLA)
-        assertGt(surplus, 0, "AutoDolaVault surplus should be positive");
+        assertGt(surplus, 0, "AutoDolaYieldStrategy surplus should be positive");
         assertApproxEqRel(surplus, 100e18, 0.01e18, "Surplus should be approximately 100 DOLA");
     }
 
@@ -250,7 +250,7 @@ contract SurplusTrackerIntegrationTest is Test {
             vaultBalance
         );
 
-        assertEq(surplus, 0, "AutoDolaVault surplus should be 0 without yield");
+        assertEq(surplus, 0, "AutoDolaYieldStrategy surplus should be 0 without yield");
     }
 
     function testAutoDolaVaultSurplusMultipleClients() public {
@@ -306,13 +306,13 @@ contract SurplusTrackerIntegrationTest is Test {
         mockVault.deposit(address(testToken), 1000e18, client1);
         vm.stopPrank();
 
-        // Setup AutoDolaVault
+        // Setup AutoDolaYieldStrategy
         vm.startPrank(client1);
         dolaToken.approve(address(autoDolaVault), 1000e18);
         autoDolaVault.deposit(address(dolaToken), 1000e18, client1);
         vm.stopPrank();
 
-        // Accrue yield only in AutoDolaVault
+        // Accrue yield only in AutoDolaYieldStrategy
         autoDola.accrueYield(100e18);
 
         // Calculate surplus for MockVault
@@ -323,7 +323,7 @@ contract SurplusTrackerIntegrationTest is Test {
             900e18
         );
 
-        // Calculate surplus for AutoDolaVault
+        // Calculate surplus for AutoDolaYieldStrategy
         uint256 autoSurplus = tracker.getSurplus(
             address(autoDolaVault),
             address(dolaToken),
@@ -333,7 +333,7 @@ contract SurplusTrackerIntegrationTest is Test {
 
         // Verify independent calculations
         assertEq(mockSurplus, 100e18, "MockVault surplus should be 100");
-        assertGt(autoSurplus, 0, "AutoDolaVault surplus should be positive");
+        assertGt(autoSurplus, 0, "AutoDolaYieldStrategy surplus should be positive");
     }
 
     // ============ REALISTIC SCENARIO TESTS ============

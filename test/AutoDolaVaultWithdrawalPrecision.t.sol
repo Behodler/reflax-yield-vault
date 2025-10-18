@@ -2,17 +2,17 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteVaults/AutoDolaVault.sol";
+import "../src/concreteVaults/AutoDolaYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
 
 /**
  * @title AutoDolaVaultWithdrawalPrecision
- * @notice Comprehensive precision tests for AutoDolaVault withdrawal operations
+ * @notice Comprehensive precision tests for AutoDolaYieldStrategy withdrawal operations
  * @dev Tests critical edge cases from tiny amounts (1 wei) to extreme values (1e40)
  *      ensuring accurate balance reduction and share calculations across all scenarios
  */
 contract AutoDolaVaultWithdrawalPrecision is Test {
-    AutoDolaVault public vault;
+    AutoDolaYieldStrategy public vault;
     MockERC20 public dolaToken;
     MockERC20 public tokeToken;
     MockAutoDOLA public autoDolaVault;
@@ -26,7 +26,7 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
     address public recipient2 = address(6);
     address public recipient3 = address(7);
 
-    // Events from AutoDolaVault
+    // Events from AutoDolaYieldStrategy
     event DolaWithdrawn(
         address indexed token,
         address indexed client,
@@ -46,8 +46,8 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
         // Deploy mock autoDOLA vault
         autoDolaVault = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
 
-        // Deploy AutoDolaVault
-        vault = new AutoDolaVault(
+        // Deploy AutoDolaYieldStrategy
+        vault = new AutoDolaYieldStrategy(
             owner,
             address(dolaToken),
             address(tokeToken),
@@ -171,7 +171,7 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
     // ============ BALANCE REDUCTION ACCURACY TESTS ============
 
     /**
-     * @notice Test proportional balance reduction accuracy (line 246 of AutoDolaVault)
+     * @notice Test proportional balance reduction accuracy (line 246 of AutoDolaYieldStrategy)
      * @dev Verifies the formula: balanceReduction = (userStoredBalance * amount) / currentBalance
      *      Tests multiple scenarios to ensure no accounting drift occurs
      */
@@ -281,7 +281,7 @@ contract AutoDolaVaultWithdrawalPrecision is Test {
 
     /**
      * @notice Test scenario where userCurrentShares rounds to zero (line 231 verification)
-     * @dev Tests the require statement: require(sharesToWithdraw > 0, "AutoDolaVault: Insufficient shares")
+     * @dev Tests the require statement: require(sharesToWithdraw > 0, "AutoDolaYieldStrategy: Insufficient shares")
      *      This is SECURITY-CRITICAL to prevent users from withdrawing when they have insufficient shares
      */
     function testWithdrawSmallShareCalculation() public {

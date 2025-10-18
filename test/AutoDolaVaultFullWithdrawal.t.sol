@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteVaults/AutoDolaVault.sol";
+import "../src/concreteVaults/AutoDolaYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
 
 /**
@@ -11,7 +11,7 @@ import "../src/mocks/MockERC20.sol";
  * @dev Tests critical scenarios where users withdraw 100% of their balance and when totalDeposited becomes zero
  */
 contract AutoDolaVaultFullWithdrawalTest is Test {
-    AutoDolaVault public vault;
+    AutoDolaYieldStrategy public vault;
     MockERC20 public dolaToken;
     MockERC20 public tokeToken;
     MockAutoDOLA public autoDolaVault;
@@ -27,7 +27,7 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
     address public recipient3 = address(8);
     address public recipient4 = address(9);
 
-    // Events from AutoDolaVault
+    // Events from AutoDolaYieldStrategy
     event DolaDeposited(
         address indexed token,
         address indexed client,
@@ -55,8 +55,8 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
         // Deploy mock autoDOLA vault
         autoDolaVault = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
 
-        // Deploy AutoDolaVault
-        vault = new AutoDolaVault(
+        // Deploy AutoDolaYieldStrategy
+        vault = new AutoDolaYieldStrategy(
             owner,
             address(dolaToken),
             address(tokeToken),
@@ -142,7 +142,7 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
 
         // This should revert - trying to withdraw more than you have
         vm.prank(client1);
-        vm.expectRevert("AutoDolaVault: insufficient balance");
+        vm.expectRevert("AutoDolaYieldStrategy: insufficient balance");
         vault.withdraw(address(dolaToken), tooMuchToWithdraw, recipient1);
 
         // Verify balance unchanged after failed withdrawal
@@ -362,7 +362,7 @@ contract AutoDolaVaultFullWithdrawalTest is Test {
 
         // Try to withdraw again - should revert
         vm.prank(client1);
-        vm.expectRevert("AutoDolaVault: insufficient balance");
+        vm.expectRevert("AutoDolaYieldStrategy: insufficient balance");
         vault.withdraw(address(dolaToken), 1, client1);
     }
 }

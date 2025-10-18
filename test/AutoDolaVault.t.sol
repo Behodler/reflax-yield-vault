@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteVaults/AutoDolaVault.sol";
+import "../src/concreteVaults/AutoDolaYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
 
 // Mock contracts for testing
@@ -130,7 +130,7 @@ contract MockMainRewarder {
 }
 
 contract AutoDolaVaultTest is Test {
-    AutoDolaVault vault;
+    AutoDolaYieldStrategy vault;
     MockERC20 dolaToken;
     MockERC20 tokeToken;
     MockAutoDOLA autoDolaVault;
@@ -158,7 +158,7 @@ contract AutoDolaVaultTest is Test {
 
         // Deploy the actual vault
         vm.prank(owner);
-        vault = new AutoDolaVault(
+        vault = new AutoDolaYieldStrategy(
             owner,
             address(dolaToken),
             address(tokeToken),
@@ -182,17 +182,17 @@ contract AutoDolaVaultTest is Test {
 
     function testConstructor() public {
         // Test constructor requirements
-        vm.expectRevert("AutoDolaVault: DOLA token cannot be zero address");
-        new AutoDolaVault(owner, address(0), address(tokeToken), address(autoDolaVault), address(mainRewarder));
+        vm.expectRevert("AutoDolaYieldStrategy: DOLA token cannot be zero address");
+        new AutoDolaYieldStrategy(owner, address(0), address(tokeToken), address(autoDolaVault), address(mainRewarder));
 
-        vm.expectRevert("AutoDolaVault: TOKE token cannot be zero address");
-        new AutoDolaVault(owner, address(dolaToken), address(0), address(autoDolaVault), address(mainRewarder));
+        vm.expectRevert("AutoDolaYieldStrategy: TOKE token cannot be zero address");
+        new AutoDolaYieldStrategy(owner, address(dolaToken), address(0), address(autoDolaVault), address(mainRewarder));
 
-        vm.expectRevert("AutoDolaVault: autoDOLA vault cannot be zero address");
-        new AutoDolaVault(owner, address(dolaToken), address(tokeToken), address(0), address(mainRewarder));
+        vm.expectRevert("AutoDolaYieldStrategy: autoDOLA vault cannot be zero address");
+        new AutoDolaYieldStrategy(owner, address(dolaToken), address(tokeToken), address(0), address(mainRewarder));
 
-        vm.expectRevert("AutoDolaVault: MainRewarder cannot be zero address");
-        new AutoDolaVault(owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(0));
+        vm.expectRevert("AutoDolaYieldStrategy: MainRewarder cannot be zero address");
+        new AutoDolaYieldStrategy(owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(0));
 
         // Test successful construction
         assertTrue(address(vault.dolaToken()) == address(dolaToken));
@@ -243,17 +243,17 @@ contract AutoDolaVaultTest is Test {
         vault.deposit(address(dolaToken), depositAmount, user1);
 
         // Test wrong token
-        vm.expectRevert("AutoDolaVault: only DOLA token supported");
+        vm.expectRevert("AutoDolaYieldStrategy: only DOLA token supported");
         vm.prank(client1);
         vault.deposit(address(tokeToken), depositAmount, user1);
 
         // Test zero amount
-        vm.expectRevert("AutoDolaVault: amount must be greater than zero");
+        vm.expectRevert("AutoDolaYieldStrategy: amount must be greater than zero");
         vm.prank(client1);
         vault.deposit(address(dolaToken), 0, user1);
 
         // Test zero recipient
-        vm.expectRevert("AutoDolaVault: recipient cannot be zero address");
+        vm.expectRevert("AutoDolaYieldStrategy: recipient cannot be zero address");
         vm.prank(client1);
         vault.deposit(address(dolaToken), depositAmount, address(0));
     }
@@ -293,22 +293,22 @@ contract AutoDolaVaultTest is Test {
         vault.withdraw(address(dolaToken), withdrawAmount, user1);
 
         // Test wrong token
-        vm.expectRevert("AutoDolaVault: only DOLA token supported");
+        vm.expectRevert("AutoDolaYieldStrategy: only DOLA token supported");
         vm.prank(client1);
         vault.withdraw(address(tokeToken), withdrawAmount, user1);
 
         // Test zero amount
-        vm.expectRevert("AutoDolaVault: amount must be greater than zero");
+        vm.expectRevert("AutoDolaYieldStrategy: amount must be greater than zero");
         vm.prank(client1);
         vault.withdraw(address(dolaToken), 0, user1);
 
         // Test zero recipient
-        vm.expectRevert("AutoDolaVault: recipient cannot be zero address");
+        vm.expectRevert("AutoDolaYieldStrategy: recipient cannot be zero address");
         vm.prank(client1);
         vault.withdraw(address(dolaToken), withdrawAmount, address(0));
 
         // Test insufficient balance
-        vm.expectRevert("AutoDolaVault: insufficient balance");
+        vm.expectRevert("AutoDolaYieldStrategy: insufficient balance");
         vm.prank(client1);
         vault.withdraw(address(dolaToken), withdrawAmount, user1);
     }
@@ -496,7 +496,7 @@ contract AutoDolaVaultTest is Test {
         uint256 withdrawAmount = 500e18;
 
         vm.prank(owner);
-        vm.expectRevert("AutoDolaVault: no shares to withdraw");
+        vm.expectRevert("AutoDolaYieldStrategy: no shares to withdraw");
         vault.emergencyWithdraw(withdrawAmount);
     }
 
@@ -604,7 +604,7 @@ contract AutoDolaVaultTest is Test {
         MockERC20 otherToken = new MockERC20("OTHER", "OTHER", 18);
 
         // Verify balance query rejects non-DOLA tokens
-        vm.expectRevert("AutoDolaVault: only DOLA token supported");
+        vm.expectRevert("AutoDolaYieldStrategy: only DOLA token supported");
         vault.balanceOf(address(otherToken), user1);
     }
 
@@ -628,13 +628,13 @@ contract AutoDolaVaultTest is Test {
         // Get initial TOKE balance of vault
         uint256 initialVaultToke = tokeToken.balanceOf(address(vault));
 
-        // Perform withdrawal with claim=true (this happens inside AutoDolaVault.withdraw)
+        // Perform withdrawal with claim=true (this happens inside AutoDolaYieldStrategy.withdraw)
         // Note: The actual claim happens when mainRewarder.withdraw is called with claim=true
         // For this test, we need to verify the mock behavior works correctly
         vm.prank(client1);
         vault.withdraw(address(dolaToken), withdrawAmount, client1);
 
-        // Note: AutoDolaVault currently calls withdraw with claim=false
+        // Note: AutoDolaYieldStrategy currently calls withdraw with claim=false
         // This test verifies the mock implementation works correctly when claim=true
         // We'll test the mock directly
         uint256 stakeAmount = 100e18;
