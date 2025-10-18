@@ -6,7 +6,7 @@ A secure vault contract system extracted from behodler3-tokenlaunch-RM, providin
 
 This project contains the core vault contracts that provide:
 
-- **Abstract Vault Contract**: Base vault implementation with security features and access control
+- **Abstract Yield Strategy Contract**: Base vault implementation with security features and access control
 - **Multi-client Authorization**: Support for multiple authorized client contracts
 - **Owner Access Control**: Emergency functions restricted to contract owner
 - **Security Features**: Comprehensive access control and validation
@@ -15,9 +15,9 @@ This project contains the core vault contracts that provide:
 
 ### Core Contracts
 
-- `src/Vault.sol` - Abstract base vault contract with security and access control
-- `src/interfaces/IVault.sol` - Vault interface defining core functionality  
-- `src/mocks/MockVault.sol` - Concrete test implementation of Vault
+- `src/AYieldStrategy.sol` - Abstract base yield strategy contract with security and access control
+- `src/interfaces/IYieldStrategy.sol` - YieldStrategy interface defining core functionality  
+- `src/mocks/MockVault.sol` - Concrete test implementation of AYieldStrategy
 - `src/mocks/MockERC20.sol` - Mock ERC20 token for testing
 
 ### Key Features
@@ -90,13 +90,13 @@ The `VaultSecurityTest.sol` provides comprehensive test coverage including:
 
 ### Implementing a Concrete Vault
 
-To create a concrete vault implementation, extend the abstract `Vault` contract:
+To create a concrete vault implementation, extend the abstract `AYieldStrategy` contract:
 
 ```solidity
-import "./Vault.sol";
+import "./AYieldStrategy.sol";
 
-contract MyVault is Vault {
-    constructor(address _owner) Vault(_owner) {}
+contract MyVault is AYieldStrategy {
+    constructor(address _owner) AYieldStrategy(_owner) {}
     
     function deposit(address token, uint256 amount, address recipient) 
         external override onlyAuthorizedClient {
