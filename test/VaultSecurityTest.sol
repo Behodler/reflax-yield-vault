@@ -128,7 +128,7 @@ contract VaultSecurityTest is Test {
         // Act & Assert - Owner can set client authorization
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit Vault.ClientAuthorizationSet(newClient, true);
+        emit AYieldStrategy.ClientAuthorizationSet(newClient, true);
         vault.setClient(newClient, true);
         
         // Verify change
@@ -165,7 +165,7 @@ contract VaultSecurityTest is Test {
         // Act & Assert - Owner can call emergency withdraw
         vm.prank(owner);
         vm.expectEmit(true, false, false, false);
-        emit Vault.EmergencyWithdraw(owner, amount);
+        emit AYieldStrategy.EmergencyWithdraw(owner, amount);
         vault.emergencyWithdraw(amount);
     }
     
@@ -346,7 +346,7 @@ contract VaultSecurityTest is Test {
         
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit Vault.ClientAuthorizationSet(newClient, true);
+        emit AYieldStrategy.ClientAuthorizationSet(newClient, true);
         vault.setClient(newClient, true);
     }
     
@@ -355,7 +355,7 @@ contract VaultSecurityTest is Test {
         
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit Vault.EmergencyWithdraw(owner, amount);
+        emit AYieldStrategy.EmergencyWithdraw(owner, amount);
         vault.emergencyWithdraw(amount);
     }
     
@@ -514,23 +514,23 @@ contract VaultSecurityTest is Test {
         // Test authorization events
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit Vault.ClientAuthorizationSet(client1, true);
+        emit AYieldStrategy.ClientAuthorizationSet(client1, true);
         vault.setClient(client1, true);
         
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit Vault.ClientAuthorizationSet(client2, true);
+        emit AYieldStrategy.ClientAuthorizationSet(client2, true);
         vault.setClient(client2, true);
         
         // Test revocation events
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit Vault.ClientAuthorizationSet(client1, false);
+        emit AYieldStrategy.ClientAuthorizationSet(client1, false);
         vault.setClient(client1, false);
         
         vm.prank(owner);
         vm.expectEmit(true, false, false, true);
-        emit Vault.ClientAuthorizationSet(client2, false);
+        emit AYieldStrategy.ClientAuthorizationSet(client2, false);
         vault.setClient(client2, false);
     }
 }
