@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteVaults/AutoDolaYieldStrategy.sol";
+import "../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
 
 // Mock contracts for testing
