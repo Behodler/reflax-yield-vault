@@ -13,13 +13,13 @@ This document details the authorization flow and security model for the percenta
 - **Vault Actual Balance**: `balanceOf(token, client)` (deposits + accumulated yield)
 - **Surplus**: The difference between vault balance and internal balance
 
-When yield-generating vaults (like AutoDolaVault) accumulate interest, the vault's actual token balance grows while the client's internal accounting remains static. This delta is the harvestable surplus.
+When yield-generating vaults (like AutoDolaYieldStrategy) accumulate interest, the vault's actual token balance grows while the client's internal accounting remains static. This delta is the harvestable surplus.
 
 ## Architecture Components
 
 ### 1. Vault Contract (Base Authorization Layer)
 
-**Location**: `src/Vault.sol`
+**Location**: `src/AYieldStrategy.sol`
 
 **Key State Variables**:
 ```solidity

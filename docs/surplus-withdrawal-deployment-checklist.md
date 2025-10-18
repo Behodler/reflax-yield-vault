@@ -257,7 +257,7 @@ Test each of these scenarios on testnet:
 #### Step 2.4: Integration Testing
 
 - [ ] Test with multiple vault types (if applicable)
-  - [ ] AutoDolaVault
+  - [ ] AutoDolaYieldStrategy
   - [ ] Other concrete vault implementations
 - [ ] Test multisig workflow end-to-end
   - [ ] Create withdrawal transaction in Gnosis Safe
