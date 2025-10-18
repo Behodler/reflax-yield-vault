@@ -132,3 +132,68 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 2. **Second Priority**: Replace any custom IERC20/IERC721 interfaces
 3. **Third Priority**: Replace other security-critical contracts
 4. **Document all changes**: List replaced contracts in commit messages
+
+## Vault-RM Project Naming Conventions
+
+**CRITICAL: YieldStrategy vs Vault Naming Distinction**
+
+The vault-RM project uses specific naming conventions to distinguish between two different concepts that were previously both called "Vault", causing confusion:
+
+### Terminology
+
+**YieldStrategy** (Our Adapter Pattern):
+- The interface and abstract contracts that define how we integrate with external yield sources
+- Files: `IYieldStrategy.sol`, `AYieldStrategy.sol`, `AutoDolaYieldStrategy.sol`
+- Purpose: Provides a standardized adapter pattern for integrating various yield-generating protocols
+- This is OUR code that wraps external vaults
+
+**Vault** (External ERC4626 Vaults):
+- The actual ERC4626 vault contracts from external yield sources (e.g., Inverse Finance)
+- Variable names: `autoDolaVault`, `vault` (when referring to external ERC4626 instances)
+- Purpose: The actual yield-generating contracts from third-party protocols
+- This is EXTERNAL code we integrate with
+
+### Naming Rules
+
+When working in this codebase or downstream projects that depend on vault-RM:
+
+1. **Use YieldStrategy for our contracts:**
+   - Interface: `IYieldStrategy`
+   - Abstract base: `AYieldStrategy`
+   - Concrete implementation: `AutoDolaYieldStrategy`
+
+2. **Use Vault for external ERC4626 instances:**
+   - Variable names: `autoDolaVault`, `vault`
+   - When referring to the external ERC4626 contract
+   - Example: `address autoDolaVault = 0x...`
+
+3. **Context matters:**
+   - If referring to our adapter pattern → use YieldStrategy
+   - If referring to external ERC4626 contracts → use Vault
+
+### Code Examples
+
+**Correct Usage:**
+```solidity
+// Our adapter interface
+IYieldStrategy public yieldStrategy;
+
+// External ERC4626 vault
+address public autoDolaVault = 0x...;
+
+// Concrete implementation of our adapter
+AutoDolaYieldStrategy strategy = new AutoDolaYieldStrategy(autoDolaVault);
+```
+
+**What Changed (Historical Context):**
+- Previously: `IVault`, `Vault`, `AutoDolaVault` (all called "Vault")
+- Now: `IYieldStrategy`, `AYieldStrategy`, `AutoDolaYieldStrategy` (our code)
+- External contracts still use "vault" in variable names
+
+### Impact on Downstream Projects
+
+Projects that reference vault-RM contracts will need to update their imports and type references:
+- Old: `import {IVault} from "vault-RM/src/IVault.sol";`
+- New: `import {IYieldStrategy} from "vault-RM/src/interfaces/IYieldStrategy.sol";`
+
+This naming convention eliminates ambiguity and makes the codebase more maintainable for both humans and AI agents.
