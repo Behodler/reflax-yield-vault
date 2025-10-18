@@ -337,7 +337,7 @@ contract AutoDolaVaultRecipientTest is Test {
         assertEq(vault.balanceOf(address(dolaToken), alice), depositAmount);
 
         // alice attempts to withdraw but should fail (not an authorized client)
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vm.prank(alice);
         vault.withdraw(address(dolaToken), depositAmount, alice);
     }

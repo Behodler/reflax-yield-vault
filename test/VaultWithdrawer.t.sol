@@ -128,7 +128,7 @@ contract VaultWithdrawerTest is Test {
     }
 
     function testSetWithdrawerZeroAddress() public {
-        vm.expectRevert("Vault: withdrawer cannot be zero address");
+        vm.expectRevert("AYieldStrategy: withdrawer cannot be zero address");
         vault.setWithdrawer(address(0), true);
     }
 
@@ -206,7 +206,7 @@ contract VaultWithdrawerTest is Test {
         vault.setBalance(address(token), client, 1000e18);
 
         vm.prank(unauthorized);
-        vm.expectRevert("Vault: unauthorized, only authorized withdrawers");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized withdrawers");
         vault.withdrawFrom(address(token), client, 100e18, recipient);
     }
 
@@ -218,7 +218,7 @@ contract VaultWithdrawerTest is Test {
         vault.setBalance(address(token), client, 1000e18);
 
         vm.prank(withdrawer);
-        vm.expectRevert("Vault: unauthorized, only authorized withdrawers");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized withdrawers");
         vault.withdrawFrom(address(token), client, 100e18, recipient);
     }
 
@@ -227,7 +227,7 @@ contract VaultWithdrawerTest is Test {
         vault.setBalance(address(token), client, 100e18);
 
         vm.prank(withdrawer);
-        vm.expectRevert("Vault: insufficient client balance");
+        vm.expectRevert("AYieldStrategy: insufficient client balance");
         vault.withdrawFrom(address(token), client, 200e18, recipient);
     }
 
@@ -235,7 +235,7 @@ contract VaultWithdrawerTest is Test {
         vault.setWithdrawer(withdrawer, true);
 
         vm.prank(withdrawer);
-        vm.expectRevert("Vault: token cannot be zero address");
+        vm.expectRevert("AYieldStrategy: token cannot be zero address");
         vault.withdrawFrom(address(0), client, 100e18, recipient);
     }
 
@@ -243,7 +243,7 @@ contract VaultWithdrawerTest is Test {
         vault.setWithdrawer(withdrawer, true);
 
         vm.prank(withdrawer);
-        vm.expectRevert("Vault: client cannot be zero address");
+        vm.expectRevert("AYieldStrategy: client cannot be zero address");
         vault.withdrawFrom(address(token), address(0), 100e18, recipient);
     }
 
@@ -252,7 +252,7 @@ contract VaultWithdrawerTest is Test {
         vault.setBalance(address(token), client, 1000e18);
 
         vm.prank(withdrawer);
-        vm.expectRevert("Vault: recipient cannot be zero address");
+        vm.expectRevert("AYieldStrategy: recipient cannot be zero address");
         vault.withdrawFrom(address(token), client, 100e18, address(0));
     }
 
@@ -261,7 +261,7 @@ contract VaultWithdrawerTest is Test {
         vault.setBalance(address(token), client, 1000e18);
 
         vm.prank(withdrawer);
-        vm.expectRevert("Vault: amount must be greater than zero");
+        vm.expectRevert("AYieldStrategy: amount must be greater than zero");
         vault.withdrawFrom(address(token), client, 0, recipient);
     }
 
@@ -293,7 +293,7 @@ contract VaultWithdrawerTest is Test {
         // No balance set for client
 
         vm.prank(withdrawer);
-        vm.expectRevert("Vault: insufficient client balance");
+        vm.expectRevert("AYieldStrategy: insufficient client balance");
         vault.withdrawFrom(address(token), client, 1e18, recipient);
     }
 

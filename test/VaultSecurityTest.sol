@@ -64,17 +64,17 @@ contract VaultSecurityTest is Test {
         
         // Act & Assert - User cannot deposit directly
         vm.prank(user1);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.deposit(address(token), amount, user1);
         
         // Act & Assert - Attacker cannot deposit
         vm.prank(attacker);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.deposit(address(token), amount, user1);
         
         // Act & Assert - Owner cannot deposit (unless they are also authorized client)
         vm.prank(owner);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.deposit(address(token), amount, user1);
     }
     
@@ -106,17 +106,17 @@ contract VaultSecurityTest is Test {
         
         // Act & Assert - User cannot withdraw directly
         vm.prank(user1);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.withdraw(address(token), withdrawAmount, user1);
         
         // Act & Assert - Attacker cannot withdraw
         vm.prank(attacker);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.withdraw(address(token), withdrawAmount, attacker);
         
         // Act & Assert - Owner cannot withdraw (unless they are also bonding curve)
         vm.prank(owner);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.withdraw(address(token), withdrawAmount, owner);
     }
     
@@ -192,13 +192,13 @@ contract VaultSecurityTest is Test {
     
     function testSetClientZeroAddressReverts() public {
         vm.prank(owner);
-        vm.expectRevert("Vault: client cannot be zero address");
+        vm.expectRevert("AYieldStrategy: client cannot be zero address");
         vault.setClient(address(0), true);
     }
     
     function testEmergencyWithdrawZeroAmountReverts() public {
         vm.prank(owner);
-        vm.expectRevert("Vault: amount must be greater than zero");
+        vm.expectRevert("AYieldStrategy: amount must be greater than zero");
         vault.emergencyWithdraw(0);
     }
     
@@ -274,7 +274,7 @@ contract VaultSecurityTest is Test {
         
         // Old client should no longer work for new deposits
         vm.prank(bondingCurve);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.deposit(address(token), 100 * 1e18, bondingCurve);
         
         // New client should work for new deposits
@@ -331,11 +331,11 @@ contract VaultSecurityTest is Test {
         
         // Users still cannot access directly for either token
         vm.prank(user1);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.withdraw(address(token), 100 * 1e18, user1);
         
         vm.prank(user1);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.withdraw(address(token2), 100 * 1e18, user1);
     }
     
@@ -475,12 +475,12 @@ contract VaultSecurityTest is Test {
         
         // Client should no longer be able to deposit
         vm.prank(client1);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.deposit(address(token), amount, client1);
         
         // Client should no longer be able to withdraw
         vm.prank(client1);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.withdraw(address(token), amount, client1);
     }
     
@@ -495,12 +495,12 @@ contract VaultSecurityTest is Test {
         
         // Unauthorized client cannot deposit
         vm.prank(unauthorizedClient);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.deposit(address(token), amount, unauthorizedClient);
         
         // Unauthorized client cannot withdraw
         vm.prank(unauthorizedClient);
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vault.withdraw(address(token), amount, unauthorizedClient);
         
         // Verify client is not authorized

@@ -238,7 +238,7 @@ contract AutoDolaVaultTest is Test {
         uint256 depositAmount = 1000e18;
 
         // Test unauthorized client
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vm.prank(address(0x9999));
         vault.deposit(address(dolaToken), depositAmount, user1);
 
@@ -288,7 +288,7 @@ contract AutoDolaVaultTest is Test {
         uint256 withdrawAmount = 1000e18;
 
         // Test unauthorized client
-        vm.expectRevert("Vault: unauthorized, only authorized clients");
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
         vm.prank(address(0x9999));
         vault.withdraw(address(dolaToken), withdrawAmount, user1);
 
@@ -920,8 +920,8 @@ contract AutoDolaVaultTest is Test {
         // This should revert during initiation phase because balance is zero
 
         // Attempt to initiate total withdrawal for user1 who has no deposits
-        // This should fail with "Vault: no balance to withdraw"
-        vm.expectRevert("Vault: no balance to withdraw");
+        // This should fail with "AYieldStrategy: no balance to withdraw"
+        vm.expectRevert("AYieldStrategy: no balance to withdraw");
         vm.prank(owner);
         vault.totalWithdrawal(address(dolaToken), user1);
 
