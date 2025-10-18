@@ -92,11 +92,11 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         address _tokeToken,
         address _autoDolaVault,
         address _mainRewarder
-    ) Vault(_owner) {
-        require(_dolaToken != address(0), "AutoDolaVault: DOLA token cannot be zero address");
-        require(_tokeToken != address(0), "AutoDolaVault: TOKE token cannot be zero address");
-        require(_autoDolaVault != address(0), "AutoDolaVault: autoDOLA vault cannot be zero address");
-        require(_mainRewarder != address(0), "AutoDolaVault: MainRewarder cannot be zero address");
+    ) AYieldStrategy(_owner) {
+        require(_dolaToken != address(0), "AutoDolaYieldStrategy: DOLA token cannot be zero address");
+        require(_tokeToken != address(0), "AutoDolaYieldStrategy: TOKE token cannot be zero address");
+        require(_autoDolaVault != address(0), "AutoDolaYieldStrategy: autoDOLA vault cannot be zero address");
+        require(_mainRewarder != address(0), "AutoDolaYieldStrategy: MainRewarder cannot be zero address");
 
         dolaToken = IERC20(_dolaToken);
         tokeToken = IERC20(_tokeToken);
@@ -120,7 +120,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @dev Implements getUserDOLABalance logic as specified in requirements
      */
     function balanceOf(address token, address account) external view override returns (uint256) {
-        require(token == address(dolaToken), "AutoDolaVault: only DOLA token supported");
+        require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
 
         uint256 storedBalance = clientBalances[token][account];
         if (storedBalance == 0) {
@@ -176,9 +176,9 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @dev Only authorized clients can call this function
      */
     function deposit(address token, uint256 amount, address recipient) external override onlyAuthorizedClient nonReentrant {
-        require(token == address(dolaToken), "AutoDolaVault: only DOLA token supported");
-        require(amount > 0, "AutoDolaVault: amount must be greater than zero");
-        require(recipient != address(0), "AutoDolaVault: recipient cannot be zero address");
+        require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
+        require(amount > 0, "AutoDolaYieldStrategy: amount must be greater than zero");
+        require(recipient != address(0), "AutoDolaYieldStrategy: recipient cannot be zero address");
 
         // Transfer DOLA from client to vault
         dolaToken.safeTransferFrom(msg.sender, address(this), amount);
@@ -189,8 +189,8 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         uint256 sharesAfter = autoDolaVault.balanceOf(address(this));
 
         // Verify shares received
-        require(sharesAfter == sharesBefore + sharesReceived, "AutoDolaVault: share calculation mismatch");
-        require(sharesReceived > 0, "AutoDolaVault: no shares received");
+        require(sharesAfter == sharesBefore + sharesReceived, "AutoDolaYieldStrategy: share calculation mismatch");
+        require(sharesReceived > 0, "AutoDolaYieldStrategy: no shares received");
 
         // Stake the autoDOLA shares in MainRewarder to earn TOKE rewards
         mainRewarder.stake(address(this), sharesReceived);
@@ -210,17 +210,17 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @dev Only authorized clients can call this function
      */
     function withdraw(address token, uint256 amount, address recipient) external override onlyAuthorizedClient nonReentrant {
-        require(token == address(dolaToken), "AutoDolaVault: only DOLA token supported");
-        require(amount > 0, "AutoDolaVault: amount must be greater than zero");
-        require(recipient != address(0), "AutoDolaVault: recipient cannot be zero address");
+        require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
+        require(amount > 0, "AutoDolaYieldStrategy: amount must be greater than zero");
+        require(recipient != address(0), "AutoDolaYieldStrategy: recipient cannot be zero address");
 
         // Get current recipient balance (includes yield)
         uint256 currentBalance = this.balanceOf(token, recipient);
-        require(amount <= currentBalance, "AutoDolaVault: insufficient balance");
+        require(amount <= currentBalance, "AutoDolaYieldStrategy: insufficient balance");
 
         // Calculate the proportional amount of shares to withdraw
         uint256 totalShares = mainRewarder.balanceOf(address(this));
-        require(totalShares > 0, "AutoDolaVault: no shares available");
+        require(totalShares > 0, "AutoDolaYieldStrategy: no shares available");
 
         // Calculate user's current proportional share
         uint256 userStoredBalance = clientBalances[token][recipient];
@@ -228,7 +228,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
 
         // Calculate shares to withdraw based on requested amount vs current balance
         uint256 sharesToWithdraw = (userCurrentShares * amount) / currentBalance;
-        require(sharesToWithdraw > 0, "AutoDolaVault: no shares to withdraw");
+        require(sharesToWithdraw > 0, "AutoDolaYieldStrategy: no shares to withdraw");
 
         // Unstake from MainRewarder first
         mainRewarder.withdraw(address(this), sharesToWithdraw, false);
@@ -239,8 +239,8 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         uint256 dolaAfter = dolaToken.balanceOf(address(this));
 
         // Verify withdrawal
-        require(dolaAfter == dolaBefore + assetsReceived, "AutoDolaVault: DOLA withdrawal mismatch");
-        require(assetsReceived >= amount, "AutoDolaVault: insufficient assets received");
+        require(dolaAfter == dolaBefore + assetsReceived, "AutoDolaYieldStrategy: DOLA withdrawal mismatch");
+        require(assetsReceived >= amount, "AutoDolaYieldStrategy: insufficient assets received");
 
         // Update client balance proportionally
         uint256 balanceReduction = (userStoredBalance * amount) / currentBalance;
@@ -259,13 +259,13 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @dev Only the owner can call this function for security
      */
     function claimTokeRewards(address recipient) external onlyOwner {
-        require(recipient != address(0), "AutoDolaVault: recipient cannot be zero address");
+        require(recipient != address(0), "AutoDolaYieldStrategy: recipient cannot be zero address");
 
         uint256 rewardsBefore = tokeToken.balanceOf(address(this));
         bool success = mainRewarder.getReward(address(this), address(this), true);
         uint256 rewardsAfter = tokeToken.balanceOf(address(this));
 
-        require(success, "AutoDolaVault: TOKE reward claim failed");
+        require(success, "AutoDolaYieldStrategy: TOKE reward claim failed");
         uint256 rewardsEarned = rewardsAfter - rewardsBefore;
 
         if (rewardsEarned > 0) {
@@ -283,7 +283,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      */
     function _emergencyWithdraw(uint256 amount) internal override {
         uint256 totalShares = mainRewarder.balanceOf(address(this));
-        require(totalShares > 0, "AutoDolaVault: no shares to withdraw");
+        require(totalShares > 0, "AutoDolaYieldStrategy: no shares to withdraw");
 
         // Calculate how many shares needed for the requested DOLA amount
         uint256 totalAssets = autoDolaVault.convertToAssets(totalShares);
@@ -315,8 +315,8 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @param amount The amount to withdraw (from cached balance)
      */
     function _totalWithdraw(address token, address client, uint256 amount) internal override {
-        require(token == address(dolaToken), "AutoDolaVault: only DOLA token supported");
-        require(amount > 0, "AutoDolaVault: amount must be greater than zero");
+        require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
+        require(amount > 0, "AutoDolaYieldStrategy: amount must be greater than zero");
 
         // Calculate proportional shares to withdraw
         uint256 totalShares = mainRewarder.balanceOf(address(this));
@@ -356,16 +356,16 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @dev Similar to regular withdraw but allows authorized withdrawers to extract surplus
      */
     function _withdrawFrom(address token, address client, uint256 amount, address recipient) internal override {
-        require(token == address(dolaToken), "AutoDolaVault: only DOLA token supported");
-        require(amount > 0, "AutoDolaVault: amount must be greater than zero");
+        require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
+        require(amount > 0, "AutoDolaYieldStrategy: amount must be greater than zero");
 
         // Get current client balance (includes yield)
         uint256 currentBalance = this.balanceOf(token, client);
-        require(amount <= currentBalance, "AutoDolaVault: insufficient balance");
+        require(amount <= currentBalance, "AutoDolaYieldStrategy: insufficient balance");
 
         // Calculate the proportional amount of shares to withdraw
         uint256 totalShares = mainRewarder.balanceOf(address(this));
-        require(totalShares > 0, "AutoDolaVault: no shares available");
+        require(totalShares > 0, "AutoDolaYieldStrategy: no shares available");
 
         // Calculate client's current proportional share
         uint256 clientStoredBalance = clientBalances[token][client];
@@ -373,7 +373,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
 
         // Calculate shares to withdraw based on requested amount vs current balance
         uint256 sharesToWithdraw = (clientCurrentShares * amount) / currentBalance;
-        require(sharesToWithdraw > 0, "AutoDolaVault: no shares to withdraw");
+        require(sharesToWithdraw > 0, "AutoDolaYieldStrategy: no shares to withdraw");
 
         // Unstake from MainRewarder first
         mainRewarder.withdraw(address(this), sharesToWithdraw, false);
@@ -384,8 +384,8 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         uint256 dolaAfter = dolaToken.balanceOf(address(this));
 
         // Verify withdrawal
-        require(dolaAfter == dolaBefore + assetsReceived, "AutoDolaVault: DOLA withdrawal mismatch");
-        require(assetsReceived >= amount, "AutoDolaVault: insufficient assets received");
+        require(dolaAfter == dolaBefore + assetsReceived, "AutoDolaYieldStrategy: DOLA withdrawal mismatch");
+        require(assetsReceived >= amount, "AutoDolaYieldStrategy: insufficient assets received");
 
         // Update client balance proportionally
         uint256 balanceReduction = (clientStoredBalance * amount) / currentBalance;
