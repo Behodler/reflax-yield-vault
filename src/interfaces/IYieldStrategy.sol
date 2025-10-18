@@ -2,10 +2,10 @@
 pragma solidity ^0.8.13;
 
 /**
- * @title IVault
- * @notice Interface for vault contract that handles token deposits and withdrawals
+ * @title IYieldStrategy
+ * @notice Interface for yield strategy adapter that handles token deposits and withdrawals
  */
-interface IVault {
+interface IYieldStrategy {
     /**
      * @notice Deposit tokens into the vault
      * @param token The token address to deposit

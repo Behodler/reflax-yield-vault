@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.13;
 
-import "../Vault.sol";
+import "../AYieldStrategy.sol";
 import "../imports/IAutoDOLA.sol";
 import "../imports/IMainRewarder.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
- * @title AutoDolaVault
- * @notice Concrete vault implementation for Tokemak's AutoDola integration
- * @dev Extends Vault.sol to provide DOLA token deposits with automatic autoDOLA staking and TOKE reward generation
+ * @title AutoDolaYieldStrategy
+ * @notice Concrete yield strategy implementation for Tokemak's AutoDola integration
+ * @dev Extends AYieldStrategy.sol to provide DOLA token deposits with automatic autoDOLA staking and TOKE reward generation
  */
-contract AutoDolaVault is Vault {
+contract AutoDolaYieldStrategy is AYieldStrategy {
     using SafeERC20 for IERC20;
 
     // ============ STATE VARIABLES ============

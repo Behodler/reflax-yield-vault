@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.13;
 
-import "./interfaces/IVault.sol";
+import "./interfaces/IYieldStrategy.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
- * @title Vault
- * @notice Abstract vault contract with security features and access control
- * @dev Provides base implementation for vault contracts with owner and multiple client access control
+ * @title AYieldStrategy
+ * @notice Abstract yield strategy contract with security features and access control
+ * @dev Provides base implementation for yield strategy adapters with owner and multiple client access control
  */
-abstract contract Vault is IVault, Ownable, ReentrancyGuard {
+abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
     
     // ============ STATE VARIABLES ============
 
