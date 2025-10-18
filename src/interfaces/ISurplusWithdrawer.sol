@@ -36,7 +36,7 @@ interface ISurplusWithdrawer {
      * @return The amount withdrawn
      * @dev Validates that percentage is between 1 and 100 (inclusive)
      *      Calculates surplus using SurplusTracker
-     *      Withdraws (surplus * percentage) / 100 using Vault.withdrawFrom()
+     *      Withdraws (surplus * percentage) / 100 using YieldStrategy.withdrawFrom()
      */
     function withdrawSurplusPercent(
         address vault,

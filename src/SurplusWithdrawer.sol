@@ -3,14 +3,14 @@ pragma solidity ^0.8.13;
 
 import "./interfaces/ISurplusWithdrawer.sol";
 import "./interfaces/ISurplusTracker.sol";
-import "./interfaces/IVault.sol";
+import "./interfaces/IYieldStrategy.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title SurplusWithdrawer
  * @notice State-changing contract with percentage-based surplus withdrawal functionality
- * @dev Integrates with SurplusTracker to calculate surplus and uses Vault's withdrawFrom to extract the specified percentage
- *      Works with ALL vault types, not just AutoDolaVault
+ * @dev Integrates with SurplusTracker to calculate surplus and uses YieldStrategy's withdrawFrom to extract the specified percentage
+ *      Works with ALL vault types, not just AutoDolaYieldStrategy
  */
 contract SurplusWithdrawer is ISurplusWithdrawer, Ownable {
 
@@ -73,7 +73,7 @@ contract SurplusWithdrawer is ISurplusWithdrawer, Ownable {
         require(withdrawAmount > 0, "SurplusWithdrawer: withdraw amount must be greater than zero");
 
         // Withdraw from vault using withdrawFrom
-        IVault(vault).withdrawFrom(token, client, withdrawAmount, recipient);
+        IYieldStrategy(vault).withdrawFrom(token, client, withdrawAmount, recipient);
 
         emit SurplusWithdrawn(vault, token, client, percentage, withdrawAmount, recipient);
 

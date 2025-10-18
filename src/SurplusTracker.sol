@@ -2,13 +2,13 @@
 pragma solidity ^0.8.13;
 
 import "./interfaces/ISurplusTracker.sol";
-import "./interfaces/IVault.sol";
+import "./interfaces/IYieldStrategy.sol";
 
 /**
  * @title SurplusTracker
  * @notice Read-only contract to calculate surplus across vault types
  * @dev Provides view functions to determine yield surplus for clients in vaults
- *      Works with ALL vault types, not just AutoDolaVault
+ *      Works with ALL vault types, not just AutoDolaYieldStrategy
  */
 contract SurplusTracker is ISurplusTracker {
     /**
@@ -39,7 +39,7 @@ contract SurplusTracker is ISurplusTracker {
         require(client != address(0), "SurplusTracker: client cannot be zero address");
 
         // Get the actual balance in the vault (includes accumulated yield)
-        uint256 vaultBalance = IVault(vault).balanceOf(token, client);
+        uint256 vaultBalance = IYieldStrategy(vault).balanceOf(token, client);
 
         // If vault balance is less than or equal to internal balance, no surplus
         if (vaultBalance <= clientInternalBalance) {

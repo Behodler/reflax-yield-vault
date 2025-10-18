@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.13;
 
-import "../Vault.sol";
+import "../AYieldStrategy.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /**
  * @title MockVault
- * @notice Mock implementation of Vault for testing purposes
+ * @notice Mock implementation of AYieldStrategy for testing purposes
  * @dev Tracks token balances internally and simulates deposit/withdrawal behavior with access control
  */
-contract MockVault is Vault {
+contract MockVault is AYieldStrategy {
     // Mapping of token => user => balance
     mapping(address => mapping(address => uint256)) private balances;
     
@@ -20,8 +20,8 @@ contract MockVault is Vault {
      * @notice Constructor to initialize the MockVault
      * @param _owner The initial owner of the contract
      */
-    constructor(address _owner) Vault(_owner) {
-        // Constructor logic handled by parent Vault
+    constructor(address _owner) AYieldStrategy(_owner) {
+        // Constructor logic handled by parent AYieldStrategy
     }
 
     /**
