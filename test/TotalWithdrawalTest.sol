@@ -73,20 +73,20 @@ contract TotalWithdrawalTest is Test {
 
     function testRevertZeroAddressToken() public {
         vm.prank(owner);
-        vm.expectRevert("Vault: token cannot be zero address");
+        vm.expectRevert("AYieldStrategy: token cannot be zero address");
         vault.totalWithdrawal(address(0), client);
     }
 
     function testRevertZeroAddressClient() public {
         vm.prank(owner);
-        vm.expectRevert("Vault: client cannot be zero address");
+        vm.expectRevert("AYieldStrategy: client cannot be zero address");
         vault.totalWithdrawal(address(token), address(0));
     }
 
     function testRevertNoBalance() public {
         address emptyClient = address(99);
         vm.prank(owner);
-        vm.expectRevert("Vault: no balance to withdraw");
+        vm.expectRevert("AYieldStrategy: no balance to withdraw");
         vault.totalWithdrawal(address(token), emptyClient);
     }
 
@@ -108,9 +108,9 @@ contract TotalWithdrawalTest is Test {
         vault.totalWithdrawal(address(token), client);
 
         // Check withdrawal state
-        (uint256 initiatedAt, Vault.WithdrawalStatus status, uint256 balance) = vault.withdrawalStates(address(token), client);
+        (uint256 initiatedAt, AYieldStrategy.WithdrawalStatus status, uint256 balance) = vault.withdrawalStates(address(token), client);
         assertEq(initiatedAt, block.timestamp);
-        assertTrue(status == Vault.WithdrawalStatus.Initiated);
+        assertTrue(status == AYieldStrategy.WithdrawalStatus.Initiated);
         assertEq(balance, DEPOSIT_AMOUNT);
     }
 
@@ -125,7 +125,7 @@ contract TotalWithdrawalTest is Test {
         vm.prank(owner);
         string memory expectedError = string(
             abi.encodePacked(
-                "Vault: withdrawal still in waiting period, executable at timestamp: ",
+                "AYieldStrategy: withdrawal still in waiting period, executable at timestamp: ",
                 vm.toString(block.timestamp + 12 hours)
             )
         );
@@ -163,9 +163,9 @@ contract TotalWithdrawalTest is Test {
         assertEq(token.balanceOf(owner), ownerBalanceBefore + DEPOSIT_AMOUNT);
 
         // Verify state was reset
-        (uint256 initiatedAt, Vault.WithdrawalStatus status, uint256 balance) = vault.withdrawalStates(address(token), client);
+        (uint256 initiatedAt, AYieldStrategy.WithdrawalStatus status, uint256 balance) = vault.withdrawalStates(address(token), client);
         assertEq(initiatedAt, 0);
-        assertTrue(status == Vault.WithdrawalStatus.None);
+        assertTrue(status == AYieldStrategy.WithdrawalStatus.None);
         assertEq(balance, 0);
     }
 
@@ -193,9 +193,9 @@ contract TotalWithdrawalTest is Test {
         vault.totalWithdrawal(address(token), client);
 
         // Verify new withdrawal state
-        (uint256 initiatedAt, Vault.WithdrawalStatus status, uint256 balance) = vault.withdrawalStates(address(token), client);
+        (uint256 initiatedAt, AYieldStrategy.WithdrawalStatus status, uint256 balance) = vault.withdrawalStates(address(token), client);
         assertEq(initiatedAt, block.timestamp);
-        assertTrue(status == Vault.WithdrawalStatus.Initiated);
+        assertTrue(status == AYieldStrategy.WithdrawalStatus.Initiated);
         assertEq(balance, DEPOSIT_AMOUNT);
     }
 
@@ -238,11 +238,11 @@ contract TotalWithdrawalTest is Test {
         vault.totalWithdrawal(address(token2), client);
 
         // Both should be in initiated state
-        (, Vault.WithdrawalStatus status1,) = vault.withdrawalStates(address(token), client);
-        (, Vault.WithdrawalStatus status2,) = vault.withdrawalStates(address(token2), client);
+        (, AYieldStrategy.WithdrawalStatus status1,) = vault.withdrawalStates(address(token), client);
+        (, AYieldStrategy.WithdrawalStatus status2,) = vault.withdrawalStates(address(token2), client);
 
-        assertTrue(status1 == Vault.WithdrawalStatus.Initiated);
-        assertTrue(status2 == Vault.WithdrawalStatus.Initiated);
+        assertTrue(status1 == AYieldStrategy.WithdrawalStatus.Initiated);
+        assertTrue(status2 == AYieldStrategy.WithdrawalStatus.Initiated);
     }
 
     function testMultipleClientsIndependentStates() public {
@@ -267,11 +267,11 @@ contract TotalWithdrawalTest is Test {
         vault.totalWithdrawal(address(token), client2);
 
         // Both should be in initiated state
-        (, Vault.WithdrawalStatus status1,) = vault.withdrawalStates(address(token), client);
-        (, Vault.WithdrawalStatus status2,) = vault.withdrawalStates(address(token), client2);
+        (, AYieldStrategy.WithdrawalStatus status1,) = vault.withdrawalStates(address(token), client);
+        (, AYieldStrategy.WithdrawalStatus status2,) = vault.withdrawalStates(address(token), client2);
 
-        assertTrue(status1 == Vault.WithdrawalStatus.Initiated);
-        assertTrue(status2 == Vault.WithdrawalStatus.Initiated);
+        assertTrue(status1 == AYieldStrategy.WithdrawalStatus.Initiated);
+        assertTrue(status2 == AYieldStrategy.WithdrawalStatus.Initiated);
     }
 
     function testReentrancyProtection() public {
@@ -319,8 +319,8 @@ contract TotalWithdrawalTest is Test {
         vault.totalWithdrawal(address(token), client);
 
         // Verify second cycle initiated
-        (, Vault.WithdrawalStatus status,) = vault.withdrawalStates(address(token), client);
-        assertTrue(status == Vault.WithdrawalStatus.Initiated);
+        (, AYieldStrategy.WithdrawalStatus status,) = vault.withdrawalStates(address(token), client);
+        assertTrue(status == AYieldStrategy.WithdrawalStatus.Initiated);
     }
 
     function testBalanceCachingBehavior() public {
@@ -380,9 +380,9 @@ contract TotalWithdrawalTest is Test {
         vm.prank(owner);
         vault.totalWithdrawal(address(token), client);
         {
-            (uint256 initiatedAt1, Vault.WithdrawalStatus status1, uint256 balance1) = vault.withdrawalStates(address(token), client);
+            (uint256 initiatedAt1, AYieldStrategy.WithdrawalStatus status1, uint256 balance1) = vault.withdrawalStates(address(token), client);
             assertEq(initiatedAt1, startTime);
-            assertTrue(status1 == Vault.WithdrawalStatus.Initiated);
+            assertTrue(status1 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(balance1, DEPOSIT_AMOUNT);
         }
 
@@ -391,9 +391,9 @@ contract TotalWithdrawalTest is Test {
         vm.prank(owner);
         vault.totalWithdrawal(address(token), client2);
         {
-            (uint256 initiatedAt2, Vault.WithdrawalStatus status2, uint256 balance2) = vault.withdrawalStates(address(token), client2);
+            (uint256 initiatedAt2, AYieldStrategy.WithdrawalStatus status2, uint256 balance2) = vault.withdrawalStates(address(token), client2);
             assertEq(initiatedAt2, startTime + 1 hours);
-            assertTrue(status2 == Vault.WithdrawalStatus.Initiated);
+            assertTrue(status2 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(balance2, DEPOSIT_AMOUNT);
         }
 
@@ -402,9 +402,9 @@ contract TotalWithdrawalTest is Test {
         vm.prank(owner);
         vault.totalWithdrawal(address(token), client3);
         {
-            (uint256 initiatedAt3, Vault.WithdrawalStatus status3, uint256 balance3) = vault.withdrawalStates(address(token), client3);
+            (uint256 initiatedAt3, AYieldStrategy.WithdrawalStatus status3, uint256 balance3) = vault.withdrawalStates(address(token), client3);
             assertEq(initiatedAt3, startTime + 2 hours);
-            assertTrue(status3 == Vault.WithdrawalStatus.Initiated);
+            assertTrue(status3 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(balance3, DEPOSIT_AMOUNT);
         }
 
@@ -448,12 +448,12 @@ contract TotalWithdrawalTest is Test {
 
         // Confirm no state corruption - all withdrawal states reset
         {
-            (, Vault.WithdrawalStatus finalStatus1,) = vault.withdrawalStates(address(token), client);
-            (, Vault.WithdrawalStatus finalStatus2,) = vault.withdrawalStates(address(token), client2);
-            (, Vault.WithdrawalStatus finalStatus3,) = vault.withdrawalStates(address(token), client3);
-            assertTrue(finalStatus1 == Vault.WithdrawalStatus.None);
-            assertTrue(finalStatus2 == Vault.WithdrawalStatus.None);
-            assertTrue(finalStatus3 == Vault.WithdrawalStatus.None);
+            (, AYieldStrategy.WithdrawalStatus finalStatus1,) = vault.withdrawalStates(address(token), client);
+            (, AYieldStrategy.WithdrawalStatus finalStatus2,) = vault.withdrawalStates(address(token), client2);
+            (, AYieldStrategy.WithdrawalStatus finalStatus3,) = vault.withdrawalStates(address(token), client3);
+            assertTrue(finalStatus1 == AYieldStrategy.WithdrawalStatus.None);
+            assertTrue(finalStatus2 == AYieldStrategy.WithdrawalStatus.None);
+            assertTrue(finalStatus3 == AYieldStrategy.WithdrawalStatus.None);
         }
     }
 
@@ -490,12 +490,12 @@ contract TotalWithdrawalTest is Test {
 
         // Verify all clients have pending withdrawals with correct status
         {
-            (, Vault.WithdrawalStatus status1,) = vault.withdrawalStates(address(token), client);
-            (, Vault.WithdrawalStatus status2,) = vault.withdrawalStates(address(token), client2);
-            (, Vault.WithdrawalStatus status3,) = vault.withdrawalStates(address(token), client3);
-            assertTrue(status1 == Vault.WithdrawalStatus.Initiated);
-            assertTrue(status2 == Vault.WithdrawalStatus.Initiated);
-            assertTrue(status3 == Vault.WithdrawalStatus.Initiated);
+            (, AYieldStrategy.WithdrawalStatus status1,) = vault.withdrawalStates(address(token), client);
+            (, AYieldStrategy.WithdrawalStatus status2,) = vault.withdrawalStates(address(token), client2);
+            (, AYieldStrategy.WithdrawalStatus status3,) = vault.withdrawalStates(address(token), client3);
+            assertTrue(status1 == AYieldStrategy.WithdrawalStatus.Initiated);
+            assertTrue(status2 == AYieldStrategy.WithdrawalStatus.Initiated);
+            assertTrue(status3 == AYieldStrategy.WithdrawalStatus.Initiated);
         }
 
         // Verify cached balances
@@ -514,18 +514,18 @@ contract TotalWithdrawalTest is Test {
 
         // Verify withdrawal states remain valid after emergency withdraw
         {
-            (, Vault.WithdrawalStatus afterStatus1, uint256 afterBalance1) = vault.withdrawalStates(address(token), client);
-            assertTrue(afterStatus1 == Vault.WithdrawalStatus.Initiated);
+            (, AYieldStrategy.WithdrawalStatus afterStatus1, uint256 afterBalance1) = vault.withdrawalStates(address(token), client);
+            assertTrue(afterStatus1 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(afterBalance1, DEPOSIT_AMOUNT);
         }
         {
-            (, Vault.WithdrawalStatus afterStatus2, uint256 afterBalance2) = vault.withdrawalStates(address(token), client2);
-            assertTrue(afterStatus2 == Vault.WithdrawalStatus.Initiated);
+            (, AYieldStrategy.WithdrawalStatus afterStatus2, uint256 afterBalance2) = vault.withdrawalStates(address(token), client2);
+            assertTrue(afterStatus2 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(afterBalance2, DEPOSIT_AMOUNT);
         }
         {
-            (, Vault.WithdrawalStatus afterStatus3, uint256 afterBalance3) = vault.withdrawalStates(address(token), client3);
-            assertTrue(afterStatus3 == Vault.WithdrawalStatus.Initiated);
+            (, AYieldStrategy.WithdrawalStatus afterStatus3, uint256 afterBalance3) = vault.withdrawalStates(address(token), client3);
+            assertTrue(afterStatus3 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(afterBalance3, DEPOSIT_AMOUNT);
         }
 
@@ -547,12 +547,12 @@ contract TotalWithdrawalTest is Test {
 
         // Verify all withdrawal states reset (no corruption)
         {
-            (, Vault.WithdrawalStatus finalStatus1,) = vault.withdrawalStates(address(token), client);
-            (, Vault.WithdrawalStatus finalStatus2,) = vault.withdrawalStates(address(token), client2);
-            (, Vault.WithdrawalStatus finalStatus3,) = vault.withdrawalStates(address(token), client3);
-            assertTrue(finalStatus1 == Vault.WithdrawalStatus.None);
-            assertTrue(finalStatus2 == Vault.WithdrawalStatus.None);
-            assertTrue(finalStatus3 == Vault.WithdrawalStatus.None);
+            (, AYieldStrategy.WithdrawalStatus finalStatus1,) = vault.withdrawalStates(address(token), client);
+            (, AYieldStrategy.WithdrawalStatus finalStatus2,) = vault.withdrawalStates(address(token), client2);
+            (, AYieldStrategy.WithdrawalStatus finalStatus3,) = vault.withdrawalStates(address(token), client3);
+            assertTrue(finalStatus1 == AYieldStrategy.WithdrawalStatus.None);
+            assertTrue(finalStatus2 == AYieldStrategy.WithdrawalStatus.None);
+            assertTrue(finalStatus3 == AYieldStrategy.WithdrawalStatus.None);
         }
     }
 }
