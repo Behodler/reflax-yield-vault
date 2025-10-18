@@ -120,7 +120,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @dev Reverts if the caller is not an authorized client address
      */
     modifier onlyAuthorizedClient() {
-        require(authorizedClients[msg.sender], "Vault: unauthorized, only authorized clients");
+        require(authorizedClients[msg.sender], "AYieldStrategy: unauthorized, only authorized clients");
         _;
     }
 
@@ -129,7 +129,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @dev Reverts if the caller is not an authorized withdrawer
      */
     modifier onlyAuthorizedWithdrawer() {
-        require(authorizedWithdrawers[msg.sender], "Vault: unauthorized, only authorized withdrawers");
+        require(authorizedWithdrawers[msg.sender], "AYieldStrategy: unauthorized, only authorized withdrawers");
         _;
     }
     
@@ -140,7 +140,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @param _owner The initial owner of the contract
      */
     constructor(address _owner) Ownable(_owner) {
-        require(_owner != address(0), "Vault: owner cannot be zero address");
+        require(_owner != address(0), "AYieldStrategy: owner cannot be zero address");
     }
     
     // ============ OWNER FUNCTIONS ============
@@ -152,7 +152,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @dev Only the contract owner can call this function
      */
     function setClient(address client, bool _auth) external override onlyOwner {
-        require(client != address(0), "Vault: client cannot be zero address");
+        require(client != address(0), "AYieldStrategy: client cannot be zero address");
 
         authorizedClients[client] = _auth;
 
@@ -166,7 +166,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @dev Only the contract owner can call this function
      */
     function setWithdrawer(address withdrawer, bool _auth) external onlyOwner {
-        require(withdrawer != address(0), "Vault: withdrawer cannot be zero address");
+        require(withdrawer != address(0), "AYieldStrategy: withdrawer cannot be zero address");
 
         authorizedWithdrawers[withdrawer] = _auth;
 
@@ -179,7 +179,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @dev Only the contract owner can call this function. Delegates to internal _emergencyWithdraw
      */
     function emergencyWithdraw(uint256 amount) external override onlyOwner {
-        require(amount > 0, "Vault: amount must be greater than zero");
+        require(amount > 0, "AYieldStrategy: amount must be greater than zero");
 
         _emergencyWithdraw(amount);
 
@@ -194,8 +194,8 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      *      Provides community protection against rugpulls while allowing legitimate fund migrations.
      */
     function totalWithdrawal(address token, address client) external override onlyOwner nonReentrant {
-        require(token != address(0), "Vault: token cannot be zero address");
-        require(client != address(0), "Vault: client cannot be zero address");
+        require(token != address(0), "AYieldStrategy: token cannot be zero address");
+        require(client != address(0), "AYieldStrategy: client cannot be zero address");
 
         WithdrawalState storage state = withdrawalStates[token][client];
         uint256 currentTime = block.timestamp;
@@ -215,7 +215,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
             revert(
                 string(
                     abi.encodePacked(
-                        "Vault: withdrawal still in waiting period, executable at timestamp: ",
+                        "AYieldStrategy: withdrawal still in waiting period, executable at timestamp: ",
                         _uint256ToString(executableAt)
                     )
                 )
@@ -237,14 +237,14 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
         uint256 amount,
         address recipient
     ) external onlyAuthorizedWithdrawer nonReentrant {
-        require(token != address(0), "Vault: token cannot be zero address");
-        require(client != address(0), "Vault: client cannot be zero address");
-        require(recipient != address(0), "Vault: recipient cannot be zero address");
-        require(amount > 0, "Vault: amount must be greater than zero");
+        require(token != address(0), "AYieldStrategy: token cannot be zero address");
+        require(client != address(0), "AYieldStrategy: client cannot be zero address");
+        require(recipient != address(0), "AYieldStrategy: recipient cannot be zero address");
+        require(amount > 0, "AYieldStrategy: amount must be greater than zero");
 
         // Check that client has sufficient balance
         uint256 clientBalance = this.balanceOf(token, client);
-        require(clientBalance >= amount, "Vault: insufficient client balance");
+        require(clientBalance >= amount, "AYieldStrategy: insufficient client balance");
 
         // Perform the withdrawal through the virtual function
         _withdrawFrom(token, client, amount, recipient);
@@ -338,7 +338,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
     ) internal {
         // Get current balance
         uint256 balance = this.balanceOf(token, client);
-        require(balance > 0, "Vault: no balance to withdraw");
+        require(balance > 0, "AYieldStrategy: no balance to withdraw");
 
         // Initialize withdrawal state
         state.initiatedAt = currentTime;
