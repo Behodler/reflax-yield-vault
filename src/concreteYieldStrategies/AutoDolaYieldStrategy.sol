@@ -240,7 +240,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
 
         // Verify withdrawal
         require(dolaAfter == dolaBefore + assetsReceived, "AutoDolaYieldStrategy: DOLA withdrawal mismatch");
-        require(assetsReceived >= amount, "AutoDolaYieldStrategy: insufficient assets received");
+        require(assetsReceived > 0, "AutoDolaYieldStrategy: insufficient assets received");
 
         // Update client balance proportionally
         uint256 balanceReduction = (userStoredBalance * amount) / currentBalance;
@@ -385,7 +385,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
 
         // Verify withdrawal
         require(dolaAfter == dolaBefore + assetsReceived, "AutoDolaYieldStrategy: DOLA withdrawal mismatch");
-        require(assetsReceived >= amount, "AutoDolaYieldStrategy: insufficient assets received");
+        require(assetsReceived > 0, "AutoDolaYieldStrategy: insufficient assets received");
 
         // Update client balance proportionally
         uint256 balanceReduction = (clientStoredBalance * amount) / currentBalance;

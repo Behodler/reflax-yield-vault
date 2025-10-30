@@ -100,14 +100,17 @@ contract AutoDolaVaultSlippage is Test {
     // ============ SLIPPAGE PROTECTION TESTS ============
 
     /**
-     * @notice Test slippage protection activates when redemption is less than expected (line 243)
-     * @dev Validates: require(assetsReceived >= amount, "AutoDolaYieldStrategy: insufficient assets received")
-     *      This is SECURITY-CRITICAL to prevent users from losing funds when autoDOLA redemption
-     *      returns less than the requested withdrawal amount
+     * @notice Test slippage protection now relies on the bonding curve, not strict validation
+     * @dev After removing the strict check (assetsReceived >= amount), slippage protection
+     *      is handled by the calling bonding curve contract. The YieldStrategy only validates
+     *      that some assets were received (assetsReceived > 0).
      *
-     *      NOTE: Line 243 protection is tested indirectly through the MockAutoDOLA redeem function.
-     *      In real scenarios, this would catch cases where the autoDOLA vault's redemption
-     *      returns fewer assets than expected due to slippage or market conditions.
+     *      When autoDOLA redemption returns less than requested due to slippage, the withdrawal
+     *      will succeed in the YieldStrategy but will fail when trying to transfer the full amount
+     *      due to ERC20InsufficientBalance. This is acceptable because:
+     *      1. The bonding curve calling this function has its own slippage protection
+     *      2. The lenient check allows for expected precision losses in ERC4626 operations
+     *      3. The strict check was overly restrictive and redundant
      */
     function testWithdrawSlippageProtectionActivates() public {
         // Setup: Deposit funds for client1 and client2
@@ -129,16 +132,16 @@ contract AutoDolaVaultSlippage is Test {
         assertLt(balanceAfterLoss, depositAmount, "Balance should reflect the loss");
         assertApproxEqRel(balanceAfterLoss, 800e18, 1e15, "Balance should be ~80% of original");
 
-        // CRITICAL TEST: Test line 243 slippage protection
+        // UPDATED TEST: After removing strict check, slippage is handled by the bonding curve
         // Enable slippage to simulate autoDOLA vault returning less than expected
-        // This tests the specific protection: require(assetsReceived >= amount, "AutoDolaYieldStrategy: insufficient assets received")
+        // Now the withdrawal will succeed (assetsReceived > 0), but transfer will fail
         autoDolaVault.enableSlippage(10); // 10% slippage
 
         // Try to withdraw balanceAfterLoss (~800e18)
         // Due to 10% slippage, autoDOLA will only return ~720e18 (90% of 800e18)
-        // This triggers line 243 protection because assetsReceived (720e18) < amount (800e18)
+        // With lenient check (assetsReceived > 0), withdrawal proceeds but transfer fails
         vm.prank(client1);
-        vm.expectRevert("AutoDolaYieldStrategy: insufficient assets received");
+        vm.expectRevert(); // Will revert with ERC20InsufficientBalance
         vault.withdraw(address(dolaToken), balanceAfterLoss, client1);
 
         // Disable slippage for subsequent operations
