@@ -251,7 +251,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         // This ensures we transfer exactly what the vault returned, handling rounding correctly
         dolaToken.safeTransfer(recipient, assetsReceived);
 
-        emit DolaWithdrawn(token, msg.sender, recipient, amount, sharesToWithdraw);
+        emit DolaWithdrawn(token, msg.sender, recipient, assetsReceived, sharesToWithdraw);
     }
 
     /**
