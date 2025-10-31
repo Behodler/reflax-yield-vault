@@ -247,8 +247,9 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         clientBalances[token][recipient] -= balanceReduction;
         totalDeposited[token] -= balanceReduction;
 
-        // Transfer DOLA to recipient
-        dolaToken.safeTransfer(recipient, amount);
+        // Transfer DOLA to recipient - use assetsReceived (actual amount from vault) not amount (requested)
+        // This ensures we transfer exactly what the vault returned, handling rounding correctly
+        dolaToken.safeTransfer(recipient, assetsReceived);
 
         emit DolaWithdrawn(token, msg.sender, recipient, amount, sharesToWithdraw);
     }
@@ -392,7 +393,8 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         clientBalances[token][client] -= balanceReduction;
         totalDeposited[token] -= balanceReduction;
 
-        // Transfer DOLA to recipient (instead of msg.sender as in regular withdraw)
-        dolaToken.safeTransfer(recipient, amount);
+        // Transfer DOLA to recipient - use assetsReceived (actual amount from vault) not amount (requested)
+        // This ensures we transfer exactly what the vault returned, handling rounding correctly
+        dolaToken.safeTransfer(recipient, assetsReceived);
     }
 }

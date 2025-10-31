@@ -132,37 +132,34 @@ contract AutoDolaVaultSlippage is Test {
         assertLt(balanceAfterLoss, depositAmount, "Balance should reflect the loss");
         assertApproxEqRel(balanceAfterLoss, 800e18, 1e15, "Balance should be ~80% of original");
 
-        // UPDATED TEST: After removing strict check, slippage is handled by the bonding curve
+        // UPDATED TEST: After story 015.2 fix, withdrawal correctly transfers assetsReceived
         // Enable slippage to simulate autoDOLA vault returning less than expected
-        // Now the withdrawal will succeed (assetsReceived > 0), but transfer will fail
+        // The withdrawal will succeed and transfer the actual amount received from the vault
         autoDolaVault.enableSlippage(10); // 10% slippage
 
         // Try to withdraw balanceAfterLoss (~800e18)
         // Due to 10% slippage, autoDOLA will only return ~720e18 (90% of 800e18)
-        // With lenient check (assetsReceived > 0), withdrawal proceeds but transfer fails
+        // With story 015.2 fix, withdrawal succeeds and transfers assetsReceived (~720e18)
+        // The bonding curve handles slippage protection at a higher level
         vm.prank(client1);
-        vm.expectRevert(); // Will revert with ERC20InsufficientBalance
         vault.withdraw(address(dolaToken), balanceAfterLoss, client1);
 
+        // Verify client1 received the actual amount from vault (with 10% slippage)
+        uint256 expectedWithSlippage = (balanceAfterLoss * 90) / 100; // 10% slippage
+        assertApproxEqRel(dolaToken.balanceOf(client1), expectedWithSlippage, 1e15, "Client should receive actual vault amount with slippage");
+
         // Disable slippage for subsequent operations
-        // (Note: expectRevert rolls back state, so slippage is still enabled)
         autoDolaVault.disableSlippage();
 
-        // Now withdraw should work normally without slippage
-        uint256 safeWithdrawAmount = balanceAfterLoss;
-        _withdraw(client1, safeWithdrawAmount, client1);
+        // Verify client2 can still withdraw normally without slippage
+        uint256 safeWithdrawAmount = vault.balanceOf(address(dolaToken), client2);
+        _withdraw(client2, safeWithdrawAmount, client2);
 
-        // After successful withdrawal, balance should be near zero
-        assertLe(vault.balanceOf(address(dolaToken), client1), 1e15, "Balance should be nearly zero after successful withdrawal");
-        assertApproxEqRel(dolaToken.balanceOf(client1), safeWithdrawAmount, 1e14, "Recipient should receive the safe amount");
+        // Verify client1 vault balance is reduced to near zero after withdrawal with slippage
+        assertLe(vault.balanceOf(address(dolaToken), client1), 1e15, "Client1 vault balance should be nearly zero after withdrawal");
 
-        // Additional verification: The line 243 check prevents scenarios where
-        // the autoDOLA vault would return less than requested
-        // Our MockAutoDOLA honors the conversion correctly, so this protection ensures
-        // that in production, any discrepancy would be caught and reverted
-        uint256 client2Balance = vault.balanceOf(address(dolaToken), client2);
-        _withdraw(client2, client2Balance, client2);
-        assertApproxEqRel(dolaToken.balanceOf(client2), client2Balance, 1e14, "Client2 should receive expected amount");
+        // Verify client2 can withdraw without slippage and receives expected amount
+        assertApproxEqRel(dolaToken.balanceOf(client2), safeWithdrawAmount, 1e14, "Client2 should receive expected amount without slippage");
     }
 
     // ============ NEGATIVE YIELD TESTS ============
