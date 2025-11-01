@@ -44,6 +44,23 @@ contract MockAutoDOLA is MockERC20 {
         return assets;
     }
 
+    function withdraw(uint256 assets, address receiver, address owner) external returns (uint256 shares) {
+        shares = convertToShares(assets);
+        require(_balances[owner] >= shares, "Insufficient shares");
+
+        _burn(owner, shares);
+        _balances[owner] -= shares;
+        _totalShares -= shares;
+        _totalAssets -= assets;
+
+        MockERC20(_asset).transfer(receiver, assets);
+        return shares;
+    }
+
+    function previewRedeem(uint256 shares) public view returns (uint256 assets) {
+        return convertToAssets(shares);
+    }
+
     function convertToShares(uint256 assets) public view returns (uint256) {
         if (_totalAssets == 0) return assets;
         return (assets * _totalShares) / _totalAssets;
