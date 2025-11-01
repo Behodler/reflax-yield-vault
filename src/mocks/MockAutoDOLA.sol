@@ -9,15 +9,13 @@ import "./MockERC20.sol";
  * @dev Simulates the external Tokemak vault that AutoDolaYieldStrategy deposits into
  */
 contract MockAutoDOLA is MockERC20 {
-    mapping(address => uint256) private _balances;
     uint256 private _totalAssets;
-    uint256 private _totalShares;
     address private _asset;
     address private _rewarder;
 
     constructor(address asset_, address rewarder_) MockERC20("AutoDOLA", "autoDOLA", 18) {
         _totalAssets = 1000000e18; // Start with 1M DOLA worth of assets
-        _totalShares = 1000000e18; // 1:1 initial ratio
+        _mint(address(this), 1000000e18); // Initialize 1:1 share ratio via ERC20 totalSupply
         _asset = asset_;
         _rewarder = rewarder_;
     }
@@ -25,8 +23,6 @@ contract MockAutoDOLA is MockERC20 {
     function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
         shares = convertToShares(assets);
         _mint(receiver, shares);
-        _balances[receiver] += shares;
-        _totalShares += shares;
         _totalAssets += assets;
 
         MockERC20(_asset).transferFrom(msg.sender, address(this), assets);
@@ -34,12 +30,10 @@ contract MockAutoDOLA is MockERC20 {
     }
 
     function redeem(uint256 shares, address receiver, address owner) external returns (uint256 assets) {
-        require(_balances[owner] >= shares, "Insufficient shares");
+        require(balanceOf(owner) >= shares, "Insufficient shares");
 
         assets = convertToAssets(shares);
         _burn(owner, shares);
-        _balances[owner] -= shares;
-        _totalShares -= shares;
         _totalAssets -= assets;
 
         MockERC20(_asset).transfer(receiver, assets);
@@ -48,11 +42,9 @@ contract MockAutoDOLA is MockERC20 {
 
     function withdraw(uint256 assets, address receiver, address owner) external returns (uint256 shares) {
         shares = convertToShares(assets);
-        require(_balances[owner] >= shares, "Insufficient shares");
+        require(balanceOf(owner) >= shares, "Insufficient shares");
 
         _burn(owner, shares);
-        _balances[owner] -= shares;
-        _totalShares -= shares;
         _totalAssets -= assets;
 
         MockERC20(_asset).transfer(receiver, assets);
@@ -65,12 +57,13 @@ contract MockAutoDOLA is MockERC20 {
 
     function convertToShares(uint256 assets) public view returns (uint256) {
         if (_totalAssets == 0) return assets;
-        return (assets * _totalShares) / _totalAssets;
+        return (assets * totalSupply()) / _totalAssets;
     }
 
     function convertToAssets(uint256 shares) public view returns (uint256) {
-        if (_totalShares == 0) return shares;
-        return (shares * _totalAssets) / _totalShares;
+        uint256 supply = totalSupply();
+        if (supply == 0) return shares;
+        return (shares * _totalAssets) / supply;
     }
 
     function asset() public view returns (address) {
