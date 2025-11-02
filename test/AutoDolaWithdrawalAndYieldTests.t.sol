@@ -721,15 +721,13 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 preciseYield = 98765432109876543210987;
         _simulateYield(preciseYield);
 
-        // Withdraw precise amount
+        // Withdraw precise amount - with new logic this succeeds (partial withdrawal)
         uint256 preciseWithdraw = 45678901234567890123456;
+        _withdraw(client1, preciseWithdraw, recipient1);
 
-        vm.expectRevert("AutoDolaYieldStrategy: insufficient balance");
-        vm.prank(client1);
-        vault.withdraw(address(dolaToken), preciseWithdraw, recipient1);
-
-        // Should be able to withdraw up to principal
-        _withdraw(client1, preciseAmount, recipient1);
+        // Should be able to withdraw remaining principal
+        uint256 remaining = preciseAmount - preciseWithdraw;
+        _withdraw(client1, remaining, recipient1);
         assertEq(vault.balanceOf(address(dolaToken), recipient1), 0, "Should fully withdraw precise amount");
     }
 

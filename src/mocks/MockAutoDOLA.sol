@@ -14,8 +14,7 @@ contract MockAutoDOLA is MockERC20 {
     address private _rewarder;
 
     constructor(address asset_, address rewarder_) MockERC20("AutoDOLA", "autoDOLA", 18) {
-        _totalAssets = 1000000e18; // Start with 1M DOLA worth of assets
-        _mint(address(this), 1000000e18); // Initialize 1:1 share ratio via ERC20 totalSupply
+        _totalAssets = 0; // Start with no assets - shares will be minted on first deposit
         _asset = asset_;
         _rewarder = rewarder_;
     }

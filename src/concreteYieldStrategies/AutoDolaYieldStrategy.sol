@@ -203,34 +203,25 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         require(recipient != address(0), "AutoDolaYieldStrategy: recipient cannot be zero address");
         require(clientBalances[token][recipient] >= amount, "AutoDolaYieldStrategy: insufficient balance");
 
-        // Calculate user's proportional shares based on ORIGINAL principal, not current value
-        // This is the KEY to yield exclusion: we burn shares based on original deposits, not current ratio
+        // Unstake ALL shares to ensure we have them available for withdrawal
         uint256 totalShares = mainRewarder.balanceOf(address(this));
         require(totalShares > 0, "AutoDolaYieldStrategy: no shares available");
-
-        // Redeem rate = shares / principal (ignores yield to exclude it from withdrawals)
-        uint256 redeemRate = (totalShares * 1e18) / totalDeposited[token];
-        uint256 sharesToUnstake = (redeemRate * amount) / 1e18;
-
-        // Unstake the calculated shares (may be more than needed due to yield)
-        mainRewarder.withdraw(address(this), sharesToUnstake, false);
+        mainRewarder.withdraw(address(this), totalShares, false);
 
         // Withdraw only the requested principal amount (not the full value of shares)
+        // The vault will burn only the shares needed for this amount
         uint256 dolaReceived = autoDolaVault.withdraw(amount, recipient, address(this));
 
-        // CRITICAL FIX: Calculate leftover shares that need re-staking
-        // Query vault for actual remaining shares and subtract what's already staked
-        // This avoids rounding errors from (sharesToUnstake - sharesUsed) calculation
-        uint256 totalVaultShares = autoDolaVault.balanceOf(address(this));
-        uint256 alreadyStakedShares = mainRewarder.balanceOf(address(this));
+        // CRITICAL FIX: Re-stake ALL remaining vault shares (yield preservation)
+        // Query vault balance AFTER withdrawal to get actual remaining shares
+        // This simple approach avoids calculation errors - just stake whatever's left
+        uint256 leftoverShares = autoDolaVault.balanceOf(address(this));
 
-        // SAFETY: Only re-stake if we have unstaked shares (prevents underflow)
-        if (totalVaultShares > alreadyStakedShares) {
-            uint256 leftoverShares = totalVaultShares - alreadyStakedShares;
+        if (leftoverShares > 0) {
             mainRewarder.stake(address(this), leftoverShares);
         }
 
-        // Update principal tracking - deduct requested amount (socializes depeg loss)
+        // Update principal tracking
         clientBalances[token][recipient] -= amount;
         totalDeposited[token] -= amount;
 
@@ -345,34 +336,25 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         require(amount > 0, "AutoDolaYieldStrategy: amount must be greater than zero");
         require(clientBalances[token][client] >= amount, "AutoDolaYieldStrategy: insufficient balance");
 
-        // Calculate user's proportional shares based on ORIGINAL principal, not current value
-        // This is the KEY to yield exclusion: we burn shares based on original deposits, not current ratio
+        // Unstake ALL shares to ensure we have them available for withdrawal
         uint256 totalShares = mainRewarder.balanceOf(address(this));
         require(totalShares > 0, "AutoDolaYieldStrategy: no shares available");
-
-        // Redeem rate = shares / principal (ignores yield to exclude it from withdrawals)
-        uint256 redeemRate = (totalShares * 1e18) / totalDeposited[token];
-        uint256 sharesToUnstake = (redeemRate * amount) / 1e18;
-
-        // Unstake the calculated shares (may be more than needed due to yield)
-        mainRewarder.withdraw(address(this), sharesToUnstake, false);
+        mainRewarder.withdraw(address(this), totalShares, false);
 
         // Withdraw only the requested principal amount (not the full value of shares)
+        // The vault will burn only the shares needed for this amount
         uint256 dolaReceived = autoDolaVault.withdraw(amount, recipient, address(this));
 
-        // CRITICAL FIX: Calculate leftover shares that need re-staking
-        // Query vault for actual remaining shares and subtract what's already staked
-        // This avoids rounding errors from (sharesToUnstake - sharesUsed) calculation
-        uint256 totalVaultShares = autoDolaVault.balanceOf(address(this));
-        uint256 alreadyStakedShares = mainRewarder.balanceOf(address(this));
+        // CRITICAL FIX: Re-stake ALL remaining vault shares (yield preservation)
+        // Query vault balance AFTER withdrawal to get actual remaining shares
+        // This simple approach avoids calculation errors - just stake whatever's left
+        uint256 leftoverShares = autoDolaVault.balanceOf(address(this));
 
-        // SAFETY: Only re-stake if we have unstaked shares (prevents underflow)
-        if (totalVaultShares > alreadyStakedShares) {
-            uint256 leftoverShares = totalVaultShares - alreadyStakedShares;
+        if (leftoverShares > 0) {
             mainRewarder.stake(address(this), leftoverShares);
         }
 
-        // Update principal tracking - deduct requested amount (socializes depeg loss)
+        // Update principal tracking
         clientBalances[token][client] -= amount;
         totalDeposited[token] -= amount;
     }
