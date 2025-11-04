@@ -16,8 +16,16 @@ contract MockVaultForWithdrawer is AYieldStrategy {
 
     constructor(address _owner) AYieldStrategy(_owner) {}
 
-    function balanceOf(address token, address account) external view override returns (uint256) {
+    function principalOf(address token, address account) external view override returns (uint256) {
         return balances[token][account];
+    }
+
+    function totalBalanceOf(address token, address account) external view override returns (uint256) {
+        return balances[token][account];
+    }
+
+    function balanceOf(address token, address account) external view override returns (uint256) {
+        return this.principalOf(token, account);
     }
 
     function deposit(address token, uint256 amount, address recipient) external override onlyAuthorizedClient {

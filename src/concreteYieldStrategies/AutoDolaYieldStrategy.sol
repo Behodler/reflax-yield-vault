@@ -113,18 +113,49 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
     // ============ PUBLIC VIEW FUNCTIONS ============
 
     /**
-     * @notice Get the balance of a token for a specific account
-     * @param token The token address (should be DOLA)
+     * @notice Get principal balance (amount deposited, excluding yield)
+     * @param token The token address
      * @param account The account address
-     * @return The DOLA principal balance (NOT including yield)
-     * @dev Returns only the principal deposited by the user, excluding accumulated yield
-     *      Yield remains locked in the contract and is not accessible to depositors
+     * @return The principal amount deposited (excluding yield)
      */
-    function balanceOf(address token, address account) external view override returns (uint256) {
+    function principalOf(address token, address account) external view override returns (uint256) {
+        require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
+        return clientBalances[token][account];
+    }
+
+    /**
+     * @notice Get total balance including proportional yield
+     * @param token The token address
+     * @param account The account address
+     * @return The total balance including principal and accumulated yield
+     * @dev Calculates user's proportional share of total vault value
+     */
+    function totalBalanceOf(address token, address account) external view override returns (uint256) {
         require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
 
-        // Return principal only - yield is NOT accessible to users
-        return clientBalances[token][account];
+        uint256 principal = clientBalances[token][account];
+        if (principal == 0 || totalDeposited[token] == 0) {
+            return 0;
+        }
+
+        // Calculate proportional share of total vault value
+        uint256 totalShares = autoDolaVault.balanceOf(address(this));
+        uint256 totalValue = autoDolaVault.convertToAssets(totalShares);
+
+        // User's proportion: (userPrincipal / totalPrincipal) * totalValue
+        return (totalValue * principal) / totalDeposited[token];
+    }
+
+    /**
+     * @notice Get balance (returns principal for backward compatibility)
+     * @param token The token address
+     * @param account The account address
+     * @return The principal balance
+     * @dev DEPRECATED: Use principalOf() or totalBalanceOf() explicitly
+     *      Kept for backward compatibility. Returns principal only.
+     */
+    function balanceOf(address token, address account) external view override returns (uint256) {
+        return this.principalOf(token, account);
     }
 
     /**

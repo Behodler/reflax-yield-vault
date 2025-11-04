@@ -64,13 +64,35 @@ contract MockVault is AYieldStrategy {
     }
 
     /**
+     * @notice Get principal balance (amount deposited, excluding yield)
+     * @param token The token address
+     * @param account The account address
+     * @return The principal amount deposited (excluding yield)
+     */
+    function principalOf(address token, address account) external view override returns (uint256) {
+        return balances[token][account];
+    }
+
+    /**
+     * @notice Get total balance including proportional yield
+     * @param token The token address
+     * @param account The account address
+     * @return The total balance including principal and accumulated yield
+     * @dev For MockVault, this returns the same as principalOf (no yield simulation)
+     */
+    function totalBalanceOf(address token, address account) external view override returns (uint256) {
+        return balances[token][account];
+    }
+
+    /**
      * @notice Get the balance of a token for a specific address
      * @param token The token address
      * @param account The account address
      * @return The token balance
+     * @dev DEPRECATED: Use principalOf() or totalBalanceOf() explicitly
      */
     function balanceOf(address token, address account) external view override returns (uint256) {
-        return balances[token][account];
+        return this.principalOf(token, account);
     }
 
     /**
