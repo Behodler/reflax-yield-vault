@@ -27,8 +27,34 @@ interface IYieldStrategy {
      * @param token The token address
      * @param account The account address
      * @return The token balance
+     * @dev DEPRECATED: This method's semantics are ambiguous (principal vs principal+yield).
+     *      Use principalOf() for principal-only queries or totalBalanceOf() for principal+yield.
+     *      For backward compatibility, existing implementations should maintain current behavior,
+     *      but new code should use the explicit methods instead.
      */
     function balanceOf(address token, address account) external view returns (uint256);
+
+    /**
+     * @notice Returns the principal balance for a specific address
+     * @dev Principal represents the amount originally deposited, excluding any accumulated yield.
+     *      This is the basis for calculating surplus yield in the SurplusTracker system.
+     * @param token The token address to query
+     * @param account The account address to query the principal balance for
+     * @return The principal balance of the account (deposits only, no yield)
+     */
+    function principalOf(address token, address account) external view returns (uint256);
+
+    /**
+     * @notice Returns the total balance including accumulated yield for a specific address
+     * @dev Total balance represents principal + yield. This is the amount that would be
+     *      received if the account withdrew all their funds. The difference between
+     *      totalBalanceOf() and principalOf() represents the accumulated yield that can
+     *      be extracted via the SurplusWithdrawer system.
+     * @param token The token address to query
+     * @param account The account address to query the total balance for
+     * @return The total balance of the account (principal + accumulated yield)
+     */
+    function totalBalanceOf(address token, address account) external view returns (uint256);
 
     /**
      * @notice Set client authorization for deposit/withdraw operations
