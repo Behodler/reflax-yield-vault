@@ -29,6 +29,9 @@ contract SurplusWithdrawer is ISurplusWithdrawer, Ownable {
     /// @notice The yield strategy address (our adapter) configured for surplus withdrawal
     address public yieldStrategy;
 
+    /// @notice The client address configured for surplus withdrawal
+    address public client;
+
     // ============ CONSTRUCTOR ============
 
     /**
@@ -46,45 +49,46 @@ contract SurplusWithdrawer is ISurplusWithdrawer, Ownable {
     // ============ CONFIGURATION FUNCTIONS ============
 
     /**
-     * @notice Configure the SurplusWithdrawer with token, vault, and yield strategy addresses
+     * @notice Configure the SurplusWithdrawer with token, vault, yield strategy, and client addresses
      * @param _token The token address for surplus withdrawal
      * @param _vault The vault address (external ERC4626) for surplus withdrawal
      * @param _yieldStrategy The yield strategy address (our adapter) for surplus withdrawal
+     * @param _client The client address whose surplus will be withdrawn
      * @dev Only callable by owner (recommend multisig)
      *      Configuration can be updated by calling this function again
      *      All addresses must be non-zero
      *      Emits ConfigurationUpdated event
      */
-    function configure(address _token, address _vault, address _yieldStrategy) external onlyOwner {
+    function configure(address _token, address _vault, address _yieldStrategy, address _client) external onlyOwner {
         require(_token != address(0), "SurplusWithdrawer: token cannot be zero address");
         require(_vault != address(0), "SurplusWithdrawer: vault cannot be zero address");
         require(_yieldStrategy != address(0), "SurplusWithdrawer: yieldStrategy cannot be zero address");
+        require(_client != address(0), "SurplusWithdrawer: client cannot be zero address");
 
         token = _token;
         vault = _vault;
         yieldStrategy = _yieldStrategy;
+        client = _client;
 
-        emit ConfigurationUpdated(_token, _vault, _yieldStrategy);
+        emit ConfigurationUpdated(_token, _vault, _yieldStrategy, _client);
     }
 
     // ============ PUBLIC FUNCTIONS ============
 
     /**
-     * @notice Withdraw a specified percentage of surplus from a client's vault balance
-     * @param client The client address whose surplus to withdraw
-     * @param clientInternalBalance The client's internal accounting balance
+     * @notice Withdraw a specified percentage of surplus from the configured client's vault balance
      * @param percentage The percentage of surplus to withdraw (1-100)
      * @param recipient The address that will receive the withdrawn surplus
      * @return The amount withdrawn
      * @dev Only the owner can call this function (recommend multisig for owner)
+     *      Uses the pre-configured client address
+     *      Calculates clientInternalBalance at runtime using yieldStrategy.principalOf(client)
      *      Validates that percentage is between 1 and 100 (inclusive)
-     *      Calculates surplus using SurplusTracker with pre-configured token and vault
+     *      Calculates surplus using SurplusTracker with pre-configured token, vault, and runtime balance
      *      Withdraws (surplus * percentage) / 100 using pre-configured YieldStrategy.withdrawFrom()
      *      Reverts if contract is not configured
      */
     function withdrawSurplusPercent(
-        address client,
-        uint256 clientInternalBalance,
         uint256 percentage,
         address recipient
     ) external override onlyOwner returns (uint256) {
@@ -92,11 +96,14 @@ contract SurplusWithdrawer is ISurplusWithdrawer, Ownable {
         require(token != address(0), "SurplusWithdrawer: not configured - token is zero address");
         require(vault != address(0), "SurplusWithdrawer: not configured - vault is zero address");
         require(yieldStrategy != address(0), "SurplusWithdrawer: not configured - yieldStrategy is zero address");
+        require(client != address(0), "SurplusWithdrawer: client cannot be zero address");
 
         // Validate inputs
-        require(client != address(0), "SurplusWithdrawer: client cannot be zero address");
         require(recipient != address(0), "SurplusWithdrawer: recipient cannot be zero address");
         require(percentage > 0 && percentage <= 100, "SurplusWithdrawer: percentage must be between 1 and 100");
+
+        // Calculate clientInternalBalance at runtime using yieldStrategy.principalOf(client)
+        uint256 clientInternalBalance = IYieldStrategy(yieldStrategy).principalOf(token, client);
 
         // Calculate surplus using SurplusTracker with configured token and vault
         uint256 surplus = surplusTracker.getSurplus(vault, token, client, clientInternalBalance);

@@ -12,11 +12,13 @@ interface ISurplusWithdrawer {
      * @param token The token address configured for surplus withdrawal
      * @param vault The vault address configured for surplus withdrawal
      * @param yieldStrategy The yield strategy address configured for surplus withdrawal
+     * @param client The client address configured for surplus withdrawal
      */
     event ConfigurationUpdated(
         address indexed token,
         address indexed vault,
-        address indexed yieldStrategy
+        address indexed yieldStrategy,
+        address client
     );
 
     /**
@@ -38,32 +40,32 @@ interface ISurplusWithdrawer {
     );
 
     /**
-     * @notice Configure the SurplusWithdrawer with token, vault, and yield strategy addresses
+     * @notice Configure the SurplusWithdrawer with token, vault, yield strategy, and client addresses
      * @param _token The token address for surplus withdrawal
      * @param _vault The vault address (external ERC4626) for surplus withdrawal
      * @param _yieldStrategy The yield strategy address (our adapter) for surplus withdrawal
+     * @param _client The client address whose surplus will be withdrawn
      * @dev Only callable by owner (recommend multisig)
      *      Configuration can be updated by calling this function again
      *      All addresses must be non-zero
      *      Emits ConfigurationUpdated event
      */
-    function configure(address _token, address _vault, address _yieldStrategy) external;
+    function configure(address _token, address _vault, address _yieldStrategy, address _client) external;
 
     /**
-     * @notice Withdraw a specified percentage of surplus from a client's vault balance
-     * @param client The client address whose surplus to withdraw
-     * @param clientInternalBalance The client's internal accounting balance
+     * @notice Withdraw a specified percentage of surplus from the configured client's vault balance
      * @param percentage The percentage of surplus to withdraw (1-100)
      * @param recipient The address that will receive the withdrawn surplus
      * @return The amount withdrawn
      * @dev Validates that percentage is between 1 and 100 (inclusive)
-     *      Calculates surplus using SurplusTracker with pre-configured token and vault
+     *      Uses the pre-configured client address
+     *      Calculates clientInternalBalance at runtime using yieldStrategy.principalOf(client)
+     *      Calculates surplus using SurplusTracker with pre-configured token, vault, and runtime balance
      *      Withdraws (surplus * percentage) / 100 using pre-configured YieldStrategy.withdrawFrom()
      *      Reverts if contract is not configured
+     *      Only callable by owner (recommend multisig)
      */
     function withdrawSurplusPercent(
-        address client,
-        uint256 clientInternalBalance,
         uint256 percentage,
         address recipient
     ) external returns (uint256);

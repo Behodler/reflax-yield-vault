@@ -10,9 +10,12 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * @dev Tracks token balances internally and simulates deposit/withdrawal behavior with access control
  */
 contract MockVault is AYieldStrategy {
-    // Mapping of token => user => balance
+    // Mapping of token => user => balance (total balance including yield)
     mapping(address => mapping(address => uint256)) private balances;
-    
+
+    // Mapping of token => user => principal balance (deposits only, no yield)
+    mapping(address => mapping(address => uint256)) private principals;
+
     // Track total deposits per token for testing
     mapping(address => uint256) public totalDeposits;
 
@@ -34,12 +37,13 @@ contract MockVault is AYieldStrategy {
         require(token != address(0), "MockVault: token is zero address");
         require(amount > 0, "MockVault: amount is zero");
         require(recipient != address(0), "MockVault: recipient is zero address");
-        
+
         // Transfer tokens from sender to vault
         IERC20(token).transferFrom(msg.sender, address(this), amount);
-        
+
         // Update internal accounting - balance tracked under the authorized client (caller), not recipient
         balances[token][msg.sender] += amount;
+        principals[token][msg.sender] += amount;
         totalDeposits[token] += amount;
     }
 
@@ -70,7 +74,7 @@ contract MockVault is AYieldStrategy {
      * @return The principal amount deposited (excluding yield)
      */
     function principalOf(address token, address account) external view override returns (uint256) {
-        return balances[token][account];
+        return principals[token][account];
     }
 
     /**
@@ -88,11 +92,11 @@ contract MockVault is AYieldStrategy {
      * @notice Get the balance of a token for a specific address
      * @param token The token address
      * @param account The account address
-     * @return The token balance
+     * @return The token balance (returns total balance including yield)
      * @dev DEPRECATED: Use principalOf() or totalBalanceOf() explicitly
      */
     function balanceOf(address token, address account) external view override returns (uint256) {
-        return this.principalOf(token, account);
+        return balances[token][account];
     }
 
     /**
@@ -155,5 +159,16 @@ contract MockVault is AYieldStrategy {
     // Additional helper functions for testing
     function getTotalDeposits(address token) external view returns (uint256) {
         return totalDeposits[token];
+    }
+
+    /**
+     * @notice Set the principal balance for an account (for testing surplus scenarios)
+     * @param token The token address
+     * @param account The account address
+     * @param principal The principal amount to set
+     * @dev This allows tests to simulate scenarios where total balance > principal (surplus exists)
+     */
+    function setPrincipal(address token, address account, uint256 principal) external {
+        principals[token][account] = principal;
     }
 }
