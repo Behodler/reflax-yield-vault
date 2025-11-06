@@ -22,6 +22,12 @@ contract SurplusWithdrawerTest is Test {
     address public recipient;
     address public nonOwner;
 
+    event ConfigurationUpdated(
+        address indexed token,
+        address indexed vault,
+        address indexed yieldStrategy
+    );
+
     event SurplusWithdrawn(
         address indexed vault,
         address indexed token,
@@ -47,6 +53,9 @@ contract SurplusWithdrawerTest is Test {
         vault.setClient(client, true);
         vault.setWithdrawer(address(withdrawer), true);
 
+        // Configure withdrawer with token, vault, and yieldStrategy (vault acts as yieldStrategy in mock)
+        withdrawer.configure(address(token), address(vault), address(vault));
+
         // Mint tokens to client for testing
         token.mint(client, 10000e18);
     }
@@ -69,6 +78,84 @@ contract SurplusWithdrawerTest is Test {
         new SurplusWithdrawer(address(tracker), address(0));
     }
 
+    // ============ CONFIGURATION TESTS ============
+
+    function testConfigureWithValidInputs() public {
+        SurplusWithdrawer newWithdrawer = new SurplusWithdrawer(address(tracker), owner);
+
+        // Expect event
+        vm.expectEmit(true, true, true, true);
+        emit ConfigurationUpdated(address(token), address(vault), address(vault));
+
+        newWithdrawer.configure(address(token), address(vault), address(vault));
+
+        assertEq(newWithdrawer.token(), address(token), "Token should be set");
+        assertEq(newWithdrawer.vault(), address(vault), "Vault should be set");
+        assertEq(newWithdrawer.yieldStrategy(), address(vault), "YieldStrategy should be set");
+    }
+
+    function testConfigureRevertsWithZeroToken() public {
+        SurplusWithdrawer newWithdrawer = new SurplusWithdrawer(address(tracker), owner);
+
+        vm.expectRevert("SurplusWithdrawer: token cannot be zero address");
+        newWithdrawer.configure(address(0), address(vault), address(vault));
+    }
+
+    function testConfigureRevertsWithZeroVault() public {
+        SurplusWithdrawer newWithdrawer = new SurplusWithdrawer(address(tracker), owner);
+
+        vm.expectRevert("SurplusWithdrawer: vault cannot be zero address");
+        newWithdrawer.configure(address(token), address(0), address(vault));
+    }
+
+    function testConfigureRevertsWithZeroYieldStrategy() public {
+        SurplusWithdrawer newWithdrawer = new SurplusWithdrawer(address(tracker), owner);
+
+        vm.expectRevert("SurplusWithdrawer: yieldStrategy cannot be zero address");
+        newWithdrawer.configure(address(token), address(vault), address(0));
+    }
+
+    function testConfigureRevertsWhenCalledByNonOwner() public {
+        SurplusWithdrawer newWithdrawer = new SurplusWithdrawer(address(tracker), owner);
+
+        vm.startPrank(nonOwner);
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", nonOwner));
+        newWithdrawer.configure(address(token), address(vault), address(vault));
+        vm.stopPrank();
+    }
+
+    function testConfigureCanBeUpdated() public {
+        SurplusWithdrawer newWithdrawer = new SurplusWithdrawer(address(tracker), owner);
+
+        // Initial configuration
+        newWithdrawer.configure(address(token), address(vault), address(vault));
+        assertEq(newWithdrawer.token(), address(token), "Token should be set initially");
+
+        // Create new token and vault
+        MockERC20 newToken = new MockERC20("New Token", "NEW", 18);
+        MockVault newVault = new MockVault(owner);
+
+        // Update configuration
+        vm.expectEmit(true, true, true, true);
+        emit ConfigurationUpdated(address(newToken), address(newVault), address(newVault));
+
+        newWithdrawer.configure(address(newToken), address(newVault), address(newVault));
+
+        assertEq(newWithdrawer.token(), address(newToken), "Token should be updated");
+        assertEq(newWithdrawer.vault(), address(newVault), "Vault should be updated");
+        assertEq(newWithdrawer.yieldStrategy(), address(newVault), "YieldStrategy should be updated");
+    }
+
+    // ============ UNCONFIGURED STATE TESTS ============
+
+    function testWithdrawSurplusPercentRevertsWhenNotConfigured() public {
+        SurplusWithdrawer newWithdrawer = new SurplusWithdrawer(address(tracker), owner);
+
+        // Try to withdraw without configuration
+        vm.expectRevert("SurplusWithdrawer: not configured - token is zero address");
+        newWithdrawer.withdrawSurplusPercent(client, 900e18, 50, recipient);
+    }
+
     // ============ PERCENTAGE VALIDATION TESTS ============
 
     function testWithdrawSurplusPercentRevertsWithZeroPercentage() public {
@@ -83,14 +170,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Try to withdraw 0%
         vm.expectRevert("SurplusWithdrawer: percentage must be between 1 and 100");
-        withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
-            clientInternalBalance,
-            0,
-            recipient
-        );
+        withdrawer.withdrawSurplusPercent(client, clientInternalBalance, 0, recipient);
     }
 
     function testWithdrawSurplusPercentRevertsWithPercentageOver100() public {
@@ -106,9 +186,7 @@ contract SurplusWithdrawerTest is Test {
         // Try to withdraw 101%
         vm.expectRevert("SurplusWithdrawer: percentage must be between 1 and 100");
         withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             101,
             recipient
@@ -128,9 +206,7 @@ contract SurplusWithdrawerTest is Test {
         // Try to withdraw 200%
         vm.expectRevert("SurplusWithdrawer: percentage must be between 1 and 100");
         withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             200,
             recipient
@@ -149,9 +225,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Withdraw 1% (boundary test)
         uint256 amount = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             1,
             recipient
@@ -174,9 +248,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Withdraw 100% (boundary test)
         uint256 amount = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             100,
             recipient
@@ -201,9 +273,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Withdraw 50%
         uint256 amount = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             50,
             recipient
@@ -226,9 +296,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Withdraw 25%
         uint256 amount = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             25,
             recipient
@@ -251,9 +319,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Withdraw 75%
         uint256 amount = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             75,
             recipient
@@ -276,9 +342,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Withdraw 30%
         uint256 amount = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             30,
             recipient
@@ -301,9 +365,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Withdraw 50%
         uint256 amount = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             50,
             recipient
@@ -316,40 +378,9 @@ contract SurplusWithdrawerTest is Test {
 
     // ============ INPUT VALIDATION TESTS ============
 
-    function testWithdrawSurplusPercentRevertsWithZeroVault() public {
-        vm.expectRevert("SurplusWithdrawer: vault cannot be zero address");
-        withdrawer.withdrawSurplusPercent(
-            address(0),
-            address(token),
-            client,
-            100e18,
-            50,
-            recipient
-        );
-    }
-
-    function testWithdrawSurplusPercentRevertsWithZeroToken() public {
-        vm.expectRevert("SurplusWithdrawer: token cannot be zero address");
-        withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(0),
-            client,
-            100e18,
-            50,
-            recipient
-        );
-    }
-
     function testWithdrawSurplusPercentRevertsWithZeroClient() public {
         vm.expectRevert("SurplusWithdrawer: client cannot be zero address");
-        withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            address(0),
-            100e18,
-            50,
-            recipient
-        );
+        withdrawer.withdrawSurplusPercent(address(0), 100e18, 50, recipient);
     }
 
     function testWithdrawSurplusPercentRevertsWithZeroRecipient() public {
@@ -361,9 +392,7 @@ contract SurplusWithdrawerTest is Test {
 
         vm.expectRevert("SurplusWithdrawer: recipient cannot be zero address");
         withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             900e18,
             50,
             address(0)
@@ -382,9 +411,7 @@ contract SurplusWithdrawerTest is Test {
 
         vm.expectRevert("SurplusWithdrawer: no surplus to withdraw");
         withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             50,
             recipient
@@ -407,9 +434,7 @@ contract SurplusWithdrawerTest is Test {
         vm.startPrank(nonOwner);
         vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", nonOwner));
         withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             50,
             recipient
@@ -429,9 +454,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Withdraw as owner (owner is address(this))
         uint256 amount = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             50,
             recipient
@@ -465,9 +488,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Withdraw 50%
         withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             50,
             recipient
@@ -492,9 +513,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Withdraw 50% of surplus
         uint256 amount = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             50,
             recipient
@@ -520,9 +539,7 @@ contract SurplusWithdrawerTest is Test {
 
         // First withdrawal: 25% of 200 = 50
         uint256 amount1 = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             25,
             recipient
@@ -535,9 +552,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Second withdrawal: 50% of 150 = 75
         uint256 amount2 = withdrawer.withdrawSurplusPercent(
-            address(vault),
-            address(token),
-            client,
+            client, 
             clientInternalBalance,
             50,
             recipient
