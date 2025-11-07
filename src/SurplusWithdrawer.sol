@@ -106,7 +106,7 @@ contract SurplusWithdrawer is ISurplusWithdrawer, Ownable {
         uint256 clientInternalBalance = IYieldStrategy(yieldStrategy).principalOf(token, client);
 
         // Calculate surplus using SurplusTracker with configured token and vault
-        uint256 surplus = surplusTracker.getSurplus(vault, token, client, clientInternalBalance);
+        uint256 surplus = surplusTracker.getSurplus(yieldStrategy, token, client, clientInternalBalance);
         require(surplus > 0, "SurplusWithdrawer: no surplus to withdraw");
 
         // Calculate withdrawal amount: (surplus * percentage) / 100
