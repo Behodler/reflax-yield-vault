@@ -441,4 +441,272 @@ contract AutoDolaYieldStrategyUnitTest is Test {
         uint256 totalValue = autoDolaVault.convertToAssets(totalShares);
         assertApproxEqAbs(vault.totalBalanceOf(address(dolaToken), client), totalValue, 1);
     }
+
+    // ============ withdrawFrom() SURPLUS EXTRACTION TESTS ============
+
+    /**
+     * Test Case 1: Pure surplus withdrawal (verify principal unchanged)
+     * This is the primary use case for withdrawFrom - extracting yield without touching principal
+     */
+    function testWithdrawFromPureSurplusExtraction() public {
+        uint256 depositAmount = 10000e18;
+        address authorizedWithdrawer = address(0xABCD);
+
+        // Setup: Deposit and authorize withdrawer
+        vm.prank(client);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client);
+        vault.deposit(address(dolaToken), depositAmount, client);
+
+        vm.prank(owner);
+        vault.setWithdrawer(authorizedWithdrawer, true);
+
+        // Generate yield (10% = 1000 DOLA surplus)
+        uint256 yieldAmount = 1000e18;
+        autoDolaVault.simulateYield(yieldAmount);
+
+        // Record state before withdrawal
+        uint256 principalBefore = vault.principalOf(address(dolaToken), client);
+        uint256 totalBalanceBefore = vault.totalBalanceOf(address(dolaToken), client);
+        uint256 surplusBefore = totalBalanceBefore - principalBefore;
+
+        // Withdraw 50% of surplus
+        uint256 withdrawAmount = surplusBefore / 2; // 500 DOLA
+        vm.prank(authorizedWithdrawer);
+        vault.withdrawFrom(address(dolaToken), client, withdrawAmount, authorizedWithdrawer);
+
+        // CRITICAL ASSERTIONS: Principal must NEVER change
+        assertEq(vault.principalOf(address(dolaToken), client), principalBefore, "Principal changed during surplus withdrawal!");
+        assertEq(vault.principalOf(address(dolaToken), client), depositAmount, "Principal does not match original deposit!");
+
+        // Total balance should decrease by withdrawal amount
+        uint256 totalBalanceAfter = vault.totalBalanceOf(address(dolaToken), client);
+        assertApproxEqAbs(totalBalanceAfter, totalBalanceBefore - withdrawAmount, 1, "Total balance did not decrease correctly");
+
+        // Remaining surplus should be approximately half
+        uint256 surplusAfter = totalBalanceAfter - principalBefore;
+        assertApproxEqAbs(surplusAfter, surplusBefore - withdrawAmount, 1, "Remaining surplus incorrect");
+    }
+
+    /**
+     * Test Case 2: Attempting to withdraw more than surplus (verify revert)
+     * This ensures the function enforces surplus-only extraction
+     */
+    function testWithdrawFromExceedingSurplusReverts() public {
+        uint256 depositAmount = 10000e18;
+        address authorizedWithdrawer = address(0xABCD);
+
+        // Setup: Deposit and authorize withdrawer
+        vm.prank(client);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client);
+        vault.deposit(address(dolaToken), depositAmount, client);
+
+        vm.prank(owner);
+        vault.setWithdrawer(authorizedWithdrawer, true);
+
+        // Generate small yield (only 100 DOLA surplus)
+        uint256 yieldAmount = 100e18;
+        autoDolaVault.simulateYield(yieldAmount);
+
+        uint256 principal = vault.principalOf(address(dolaToken), client);
+        uint256 totalBalance = vault.totalBalanceOf(address(dolaToken), client);
+        uint256 surplus = totalBalance - principal;
+
+        // Attempt to withdraw MORE than available surplus
+        uint256 withdrawAmount = surplus + 50e18;
+
+        // Should revert with clear error message
+        vm.expectRevert("AutoDolaYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal");
+        vm.prank(authorizedWithdrawer);
+        vault.withdrawFrom(address(dolaToken), client, withdrawAmount, authorizedWithdrawer);
+
+        // Verify principal unchanged after failed withdrawal
+        assertEq(vault.principalOf(address(dolaToken), client), depositAmount);
+    }
+
+    /**
+     * Test Case 3: Multiple surplus withdrawals (verify principal never changes)
+     * This tests that repeated surplus extractions don't compound errors
+     */
+    function testWithdrawFromMultipleSurplusWithdrawals() public {
+        uint256 depositAmount = 10000e18;
+        address authorizedWithdrawer = address(0xABCD);
+
+        // Setup
+        vm.prank(client);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client);
+        vault.deposit(address(dolaToken), depositAmount, client);
+
+        vm.prank(owner);
+        vault.setWithdrawer(authorizedWithdrawer, true);
+
+        // Generate yield
+        uint256 yieldAmount = 1000e18;
+        autoDolaVault.simulateYield(yieldAmount);
+
+        uint256 principalBefore = vault.principalOf(address(dolaToken), client);
+
+        // Perform 5 surplus withdrawals
+        for (uint i = 0; i < 5; i++) {
+            uint256 totalBalance = vault.totalBalanceOf(address(dolaToken), client);
+            uint256 principal = vault.principalOf(address(dolaToken), client);
+            uint256 surplus = totalBalance - principal;
+
+            if (surplus > 10e18) { // Only withdraw if surplus is significant
+                uint256 withdrawAmount = surplus / 4; // Withdraw 25% of current surplus
+
+                vm.prank(authorizedWithdrawer);
+                vault.withdrawFrom(address(dolaToken), client, withdrawAmount, authorizedWithdrawer);
+
+                // CRITICAL: Principal must NEVER change across multiple withdrawals
+                assertEq(vault.principalOf(address(dolaToken), client), principalBefore, "Principal changed during multiple surplus withdrawals!");
+            }
+        }
+
+        // Final verification: Principal is still exactly the original deposit
+        assertEq(vault.principalOf(address(dolaToken), client), depositAmount);
+        assertEq(vault.principalOf(address(dolaToken), client), principalBefore);
+    }
+
+    /**
+     * Test Case 4: Edge case - withdraw exact surplus amount
+     * This tests withdrawing 100% of available surplus
+     */
+    function testWithdrawFromExactSurplusAmount() public {
+        uint256 depositAmount = 10000e18;
+        address authorizedWithdrawer = address(0xABCD);
+
+        // Setup
+        vm.prank(client);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client);
+        vault.deposit(address(dolaToken), depositAmount, client);
+
+        vm.prank(owner);
+        vault.setWithdrawer(authorizedWithdrawer, true);
+
+        // Generate yield
+        uint256 yieldAmount = 500e18;
+        autoDolaVault.simulateYield(yieldAmount);
+
+        uint256 principal = vault.principalOf(address(dolaToken), client);
+        uint256 totalBalance = vault.totalBalanceOf(address(dolaToken), client);
+        uint256 surplus = totalBalance - principal;
+
+        // Withdraw EXACTLY the surplus amount
+        vm.prank(authorizedWithdrawer);
+        vault.withdrawFrom(address(dolaToken), client, surplus, authorizedWithdrawer);
+
+        // Principal must remain unchanged
+        assertEq(vault.principalOf(address(dolaToken), client), depositAmount);
+
+        // After withdrawing all surplus, totalBalanceOf should approximately equal principal
+        uint256 totalBalanceAfter = vault.totalBalanceOf(address(dolaToken), client);
+        assertApproxEqAbs(totalBalanceAfter, principal, 1, "Total balance should equal principal after withdrawing all surplus");
+
+        // Surplus should be zero (or near zero due to rounding)
+        uint256 surplusAfter = totalBalanceAfter > principal ? totalBalanceAfter - principal : 0;
+        assertLe(surplusAfter, 1, "Surplus should be zero after withdrawing all of it");
+    }
+
+    /**
+     * Test Case 5: Verify slippage protection triggers correctly
+     * This tests the slippage protection in the withdrawal mechanism
+     */
+    function testWithdrawFromSlippageProtection() public {
+        uint256 depositAmount = 10000e18;
+        address authorizedWithdrawer = address(0xABCD);
+
+        // Setup
+        vm.prank(client);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client);
+        vault.deposit(address(dolaToken), depositAmount, client);
+
+        vm.prank(owner);
+        vault.setWithdrawer(authorizedWithdrawer, true);
+
+        // Generate yield
+        uint256 yieldAmount = 1000e18;
+        autoDolaVault.simulateYield(yieldAmount);
+
+        uint256 principal = vault.principalOf(address(dolaToken), client);
+        uint256 totalBalance = vault.totalBalanceOf(address(dolaToken), client);
+        uint256 surplus = totalBalance - principal;
+
+        // Configure mock vault to return less than requested (simulate slippage)
+        uint256 withdrawAmount = surplus / 2;
+        autoDolaVault.setSlippageSimulation(true, withdrawAmount - 1); // Return 1 wei less
+
+        // Should revert due to slippage protection
+        vm.expectRevert("AutoDolaYieldStrategy: vault withdrawal slippage");
+        vm.prank(authorizedWithdrawer);
+        vault.withdrawFrom(address(dolaToken), client, withdrawAmount, authorizedWithdrawer);
+
+        // Reset slippage simulation
+        autoDolaVault.setSlippageSimulation(false, 0);
+
+        // Now withdrawal should succeed
+        vm.prank(authorizedWithdrawer);
+        vault.withdrawFrom(address(dolaToken), client, withdrawAmount, authorizedWithdrawer);
+
+        // Principal must remain unchanged even after slippage test
+        assertEq(vault.principalOf(address(dolaToken), client), depositAmount);
+    }
+
+    /**
+     * Test Case 6: Zero address recipient should revert
+     */
+    function testWithdrawFromZeroAddressRecipient() public {
+        uint256 depositAmount = 10000e18;
+        address authorizedWithdrawer = address(0xABCD);
+
+        // Setup
+        vm.prank(client);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client);
+        vault.deposit(address(dolaToken), depositAmount, client);
+
+        vm.prank(owner);
+        vault.setWithdrawer(authorizedWithdrawer, true);
+
+        // Generate yield
+        autoDolaVault.simulateYield(100e18);
+
+        // Should revert for zero address recipient (checked by parent AYieldStrategy)
+        vm.expectRevert("AYieldStrategy: recipient cannot be zero address");
+        vm.prank(authorizedWithdrawer);
+        vault.withdrawFrom(address(dolaToken), client, 50e18, address(0));
+    }
+
+    /**
+     * Test Case 7: No surplus available (should revert)
+     */
+    function testWithdrawFromNoSurplusAvailable() public {
+        uint256 depositAmount = 10000e18;
+        address authorizedWithdrawer = address(0xABCD);
+
+        // Setup
+        vm.prank(client);
+        dolaToken.approve(address(vault), depositAmount);
+        vm.prank(client);
+        vault.deposit(address(dolaToken), depositAmount, client);
+
+        vm.prank(owner);
+        vault.setWithdrawer(authorizedWithdrawer, true);
+
+        // No yield generated - surplus is zero
+        uint256 principal = vault.principalOf(address(dolaToken), client);
+        uint256 totalBalance = vault.totalBalanceOf(address(dolaToken), client);
+        uint256 surplus = totalBalance > principal ? totalBalance - principal : 0;
+
+        assertEq(surplus, 0, "Should have no surplus");
+
+        // Attempt to withdraw should revert
+        vm.expectRevert("AutoDolaYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal");
+        vm.prank(authorizedWithdrawer);
+        vault.withdrawFrom(address(dolaToken), client, 1e18, authorizedWithdrawer);
+    }
 }

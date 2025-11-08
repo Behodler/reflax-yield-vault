@@ -13,10 +13,15 @@ contract MockAutoDOLA is MockERC20 {
     address private _asset;
     address private _rewarder;
 
+    // Slippage simulation
+    bool private _slippageEnabled;
+    uint256 private _slippageReturnAmount;
+
     constructor(address asset_, address rewarder_) MockERC20("AutoDOLA", "autoDOLA", 18) {
         _totalAssets = 0; // Start with no assets - shares will be minted on first deposit
         _asset = asset_;
         _rewarder = rewarder_;
+        _slippageEnabled = false;
     }
 
     function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
@@ -46,8 +51,10 @@ contract MockAutoDOLA is MockERC20 {
         _burn(owner, shares);
         _totalAssets -= assets;
 
-        MockERC20(_asset).transfer(receiver, assets);
-        return shares;
+        // Handle slippage simulation if enabled
+        uint256 transferAmount = _slippageEnabled ? _slippageReturnAmount : assets;
+        MockERC20(_asset).transfer(receiver, transferAmount);
+        return transferAmount; // Return actual transferred amount (not shares)
     }
 
     function previewRedeem(uint256 shares) public view returns (uint256 assets) {
@@ -76,5 +83,11 @@ contract MockAutoDOLA is MockERC20 {
     // Simulate yield growth
     function simulateYield(uint256 yieldAmount) external {
         _totalAssets += yieldAmount;
+    }
+
+    // Enable/disable slippage simulation for testing
+    function setSlippageSimulation(bool enabled, uint256 returnAmount) external {
+        _slippageEnabled = enabled;
+        _slippageReturnAmount = returnAmount;
     }
 }

@@ -357,36 +357,49 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @notice Internal withdrawFrom implementation for authorized surplus withdrawal
      * @param token The token address (must be DOLA)
      * @param client The client address whose balance to withdraw from
-     * @param amount The amount to withdraw (can include yield portion for surplus extraction)
+     * @param amount The amount to withdraw (MUST be <= available surplus)
      * @param recipient The address that will receive the withdrawn tokens
-     * @dev Allows authorized withdrawers to extract surplus (yield) beyond principal
-     *      Uses same yield-preserving logic as regular withdraw
+     * @dev Allows authorized withdrawers to extract surplus (yield) without touching principal.
+     *      This function is EXCLUSIVELY for surplus extraction and will revert if attempting
+     *      to withdraw more than available yield. For full balance withdrawal including principal,
+     *      use totalWithdrawal() which has proper timelock protection.
+     *
+     *      CRITICAL: Principal tracking (clientBalances) is NEVER modified by this function.
+     *      Only surplus/yield can be withdrawn. This ensures principal remains accurate over time.
      */
     function _withdrawFrom(address token, address client, uint256 amount, address recipient) internal override {
         require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
-        require(amount > 0, "AutoDolaYieldStrategy: amount must be greater than zero");
-        require(clientBalances[token][client] >= amount, "AutoDolaYieldStrategy: insufficient balance");
+        // Note: amount > 0 and recipient != address(0) checks are performed by parent AYieldStrategy
+
+        // Get current balances
+        uint256 principal = clientBalances[token][client];
+        uint256 totalBalance = this.totalBalanceOf(token, client);
+
+        // Calculate available surplus (yield)
+        uint256 surplus = totalBalance > principal ? totalBalance - principal : 0;
+
+        // CRITICAL: withdrawFrom is ONLY for surplus extraction
+        // If you need to withdraw principal, use totalWithdrawal() with timelock protection
+        require(amount <= surplus, "AutoDolaYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal");
 
         // Unstake ALL shares to ensure we have them available for withdrawal
         uint256 totalShares = mainRewarder.balanceOf(address(this));
         require(totalShares > 0, "AutoDolaYieldStrategy: no shares available");
         mainRewarder.withdraw(address(this), totalShares, false);
 
-        // Withdraw only the requested principal amount (not the full value of shares)
-        // The vault will burn only the shares needed for this amount
+        // Withdraw the requested amount from the vault
         uint256 dolaReceived = autoDolaVault.withdraw(amount, recipient, address(this));
+        require(dolaReceived >= amount, "AutoDolaYieldStrategy: vault withdrawal slippage");
 
-        // CRITICAL FIX: Re-stake ALL remaining vault shares (yield preservation)
-        // Query vault balance AFTER withdrawal to get actual remaining shares
-        // This simple approach avoids calculation errors - just stake whatever's left
+        // Re-stake ALL remaining vault shares (yield preservation)
         uint256 leftoverShares = autoDolaVault.balanceOf(address(this));
-
         if (leftoverShares > 0) {
             mainRewarder.stake(address(this), leftoverShares);
         }
 
-        // Update principal tracking
-        clientBalances[token][client] -= amount;
-        totalDeposited[token] -= amount;
+        // CORRECT: NEVER modify principal tracking for surplus withdrawals
+        // clientBalances[token][client] stays unchanged - principal is immutable here
+        // totalDeposited[token] stays unchanged - only tracking actual deposits
+        // Only the vault shares are reduced, which affects totalBalanceOf() but not principalOf()
     }
 }
