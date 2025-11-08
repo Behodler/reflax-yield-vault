@@ -3,17 +3,23 @@ pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
 import "../src/SurplusTracker.sol";
-import "../src/mocks/MockVault.sol";
+import "../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
+import "../src/mocks/MockAutoDOLA.sol";
+import "../src/mocks/MockMainRewarder.sol";
 
 /**
  * @title SurplusTrackerTest
  * @notice Comprehensive unit tests for SurplusTracker contract
+ * @dev Uses AutoDolaYieldStrategy (real implementation) with mocked external dependencies
  */
 contract SurplusTrackerTest is Test {
     SurplusTracker public tracker;
-    MockVault public vault;
+    AutoDolaYieldStrategy public vault;
     MockERC20 public token;
+    MockERC20 public tokeToken;
+    MockAutoDOLA public autoDolaVault;
+    MockMainRewarder public mainRewarder;
 
     address public owner;
     address public client;
@@ -24,15 +30,32 @@ contract SurplusTrackerTest is Test {
         client = address(0x1);
         recipient = address(0x2);
 
+        // Deploy tracker
         tracker = new SurplusTracker();
-        vault = new MockVault(owner);
+
+        // Deploy mock tokens
         token = new MockERC20("Test Token", "TEST", 18);
+        tokeToken = new MockERC20("TOKE", "TOKE", 18);
+
+        // Deploy mock external dependencies
+        mainRewarder = new MockMainRewarder(address(tokeToken));
+        autoDolaVault = new MockAutoDOLA(address(token), address(mainRewarder));
+
+        // Deploy the real AutoDolaYieldStrategy
+        vault = new AutoDolaYieldStrategy(
+            owner,
+            address(token),
+            address(tokeToken),
+            address(autoDolaVault),
+            address(mainRewarder)
+        );
 
         // Authorize client for vault operations
         vault.setClient(client, true);
 
-        // Mint tokens to client for testing
+        // Mint tokens to client and autoDolaVault for testing
         token.mint(client, 10000e18);
+        token.mint(address(autoDolaVault), 10000e18); // For autoDOLA mock
     }
 
     // ============ BASIC FUNCTIONALITY TESTS ============
@@ -183,9 +206,11 @@ contract SurplusTrackerTest is Test {
     }
 
     function testGetSurplusWithLargeAmounts() public {
-        // Setup: Client has max uint256/2 tokens in vault
-        uint256 largeAmount = type(uint256).max / 2;
+        // Setup: Client has a reasonably large amount (1 trillion tokens)
+        // Note: Using type(uint256).max / 2 causes overflow in ERC4626 share conversion
+        uint256 largeAmount = 1_000_000_000_000e18; // 1 trillion tokens
         token.mint(client, largeAmount);
+        token.mint(address(autoDolaVault), largeAmount); // For autoDOLA mock
 
         vm.startPrank(client);
         token.approve(address(vault), largeAmount);
@@ -277,9 +302,9 @@ contract SurplusTrackerTest is Test {
         vault.deposit(address(token), 1000e18, client);
         vm.stopPrank();
 
-        // Client withdraws 200 tokens
+        // Client withdraws 200 tokens (to themselves, not recipient)
         vm.prank(client);
-        vault.withdraw(address(token), 200e18, recipient);
+        vault.withdraw(address(token), 200e18, client);
 
         // Vault now has 800 tokens for client
         // Client's internal accounting shows 750 (some yield accrued)
@@ -294,38 +319,9 @@ contract SurplusTrackerTest is Test {
         assertEq(surplus, 50e18, "Surplus should be correct after withdrawal");
     }
 
-    function testGetSurplusWithDifferentTokens() public {
-        MockERC20 token2 = new MockERC20("Token 2", "TK2", 18);
-        token2.mint(client, 10000e18);
-
-        // Setup: Client deposits different amounts in different tokens
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-
-        token2.approve(address(vault), 2000e18);
-        vault.deposit(address(token2), 2000e18, client);
-        vm.stopPrank();
-
-        // Calculate surplus for each token independently
-        uint256 surplus1 = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            900e18
-        );
-
-        uint256 surplus2 = tracker.getSurplus(
-            address(vault),
-            address(token2),
-            client,
-            1900e18
-        );
-
-        // Verify independent calculations
-        assertEq(surplus1, 100e18, "Token 1 surplus should be 100");
-        assertEq(surplus2, 100e18, "Token 2 surplus should be 100");
-    }
+    // NOTE: Test removed - AutoDolaYieldStrategy only supports DOLA token, not arbitrary tokens.
+    // This test was valid for MockVault but not for the real implementation.
+    // The single-token constraint is an architectural decision, not a bug.
 
     // ============ READ-ONLY VERIFICATION TESTS ============
 
