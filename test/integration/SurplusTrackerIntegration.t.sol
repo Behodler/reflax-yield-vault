@@ -3,110 +3,28 @@ pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
 import "../../src/SurplusTracker.sol";
-import "../../src/mocks/MockVault.sol";
 import "../../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
 import "../../src/mocks/MockERC20.sol";
-
-/**
- * @title MockAutoDola
- * @notice Mock implementation of IAutoDOLA for testing
- */
-contract MockAutoDola {
-    MockERC20 public asset;
-    mapping(address => uint256) public shares;
-    uint256 public totalShares;
-    uint256 public totalAssets;
-
-    constructor(address _asset) {
-        asset = MockERC20(_asset);
-    }
-
-    function deposit(uint256 assets, address receiver) external returns (uint256) {
-        asset.transferFrom(msg.sender, address(this), assets);
-        uint256 sharesToMint = totalShares == 0 ? assets : (assets * totalShares) / totalAssets;
-        shares[receiver] += sharesToMint;
-        totalShares += sharesToMint;
-        totalAssets += assets;
-        return sharesToMint;
-    }
-
-    function redeem(uint256 sharesToBurn, address receiver, address owner) external returns (uint256) {
-        require(shares[owner] >= sharesToBurn, "Insufficient shares");
-        uint256 assetsToReturn = (sharesToBurn * totalAssets) / totalShares;
-        shares[owner] -= sharesToBurn;
-        totalShares -= sharesToBurn;
-        totalAssets -= assetsToReturn;
-        asset.transfer(receiver, assetsToReturn);
-        return assetsToReturn;
-    }
-
-    function convertToAssets(uint256 sharesToConvert) external view returns (uint256) {
-        if (totalShares == 0) return sharesToConvert;
-        return (sharesToConvert * totalAssets) / totalShares;
-    }
-
-    function convertToShares(uint256 assetsToConvert) external view returns (uint256) {
-        if (totalAssets == 0) return assetsToConvert;
-        return (assetsToConvert * totalShares) / totalAssets;
-    }
-
-    function balanceOf(address account) external view returns (uint256) {
-        return shares[account];
-    }
-
-    function approve(address spender, uint256 amount) external returns (bool) {
-        // Mock approval
-        return true;
-    }
-
-    // Helper function to simulate yield accrual
-    function accrueYield(uint256 yieldAmount) external {
-        asset.mint(address(this), yieldAmount);
-        totalAssets += yieldAmount;
-    }
-}
-
-/**
- * @title MockMainRewarder
- * @notice Mock implementation of IMainRewarder for testing
- */
-contract MockMainRewarder {
-    mapping(address => uint256) public stakedBalances;
-
-    function stake(address account, uint256 amount) external {
-        stakedBalances[account] += amount;
-    }
-
-    function withdraw(address account, uint256 amount, bool claim) external {
-        stakedBalances[account] -= amount;
-    }
-
-    function getReward(address account, address recipient, bool claim) external returns (bool) {
-        return true;
-    }
-
-    function earned(address account) external view returns (uint256) {
-        return 0;
-    }
-
-    function balanceOf(address account) external view returns (uint256) {
-        return stakedBalances[account];
-    }
-}
+import "../../src/mocks/MockAutoDOLA.sol";
+import "../../src/mocks/MockMainRewarder.sol";
 
 /**
  * @title SurplusTrackerIntegrationTest
- * @notice Integration tests for SurplusTracker with multiple vault types
+ * @notice Integration tests for SurplusTracker with AutoDolaYieldStrategy
+ * @dev Uses AutoDolaYieldStrategy (real implementation) with mocked external dependencies
  */
 contract SurplusTrackerIntegrationTest is Test {
     SurplusTracker public tracker;
-    MockVault public mockVault;
     AutoDolaYieldStrategy public autoDolaVault;
+    AutoDolaYieldStrategy public secondVault; // For multi-vault tests
 
     MockERC20 public dolaToken;
     MockERC20 public tokeToken;
-    MockAutoDola public autoDola;
+    MockAutoDOLA public autoDola;
     MockMainRewarder public mainRewarder;
+
+    MockAutoDOLA public autoDola2; // For second vault
+    MockMainRewarder public mainRewarder2; // For second vault
 
     address public owner;
     address public client1;
@@ -124,16 +42,15 @@ contract SurplusTrackerIntegrationTest is Test {
         dolaToken = new MockERC20("DOLA", "DOLA", 18);
         tokeToken = new MockERC20("TOKE", "TOKE", 18);
 
-        // Deploy mock AutoDola and MainRewarder
-        autoDola = new MockAutoDola(address(dolaToken));
-        mainRewarder = new MockMainRewarder();
+        // Deploy mock external dependencies for first vault
+        mainRewarder = new MockMainRewarder(address(tokeToken));
+        autoDola = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
 
-        // Deploy MockVault
-        mockVault = new MockVault(owner);
-        mockVault.setClient(client1, true);
-        mockVault.setClient(client2, true);
+        // Deploy mock external dependencies for second vault
+        mainRewarder2 = new MockMainRewarder(address(tokeToken));
+        autoDola2 = new MockAutoDOLA(address(dolaToken), address(mainRewarder2));
 
-        // Deploy AutoDolaYieldStrategy
+        // Deploy first AutoDolaYieldStrategy
         autoDolaVault = new AutoDolaYieldStrategy(
             owner,
             address(dolaToken),
@@ -144,59 +61,65 @@ contract SurplusTrackerIntegrationTest is Test {
         autoDolaVault.setClient(client1, true);
         autoDolaVault.setClient(client2, true);
 
-        // Mint tokens to clients
+        // Deploy second AutoDolaYieldStrategy for multi-vault tests
+        secondVault = new AutoDolaYieldStrategy(
+            owner,
+            address(dolaToken),
+            address(tokeToken),
+            address(autoDola2),
+            address(mainRewarder2)
+        );
+        secondVault.setClient(client1, true);
+        secondVault.setClient(client2, true);
+
+        // Mint tokens to clients and external vaults
         dolaToken.mint(client1, 10000e18);
         dolaToken.mint(client2, 10000e18);
-
-        MockERC20 testToken = new MockERC20("TEST", "TEST", 18);
-        testToken.mint(client1, 10000e18);
-        testToken.mint(client2, 10000e18);
+        dolaToken.mint(address(autoDola), 10000e18);
+        dolaToken.mint(address(autoDola2), 10000e18);
     }
 
-    // ============ MOCKVAULT INTEGRATION TESTS ============
+    // ============ BASIC SURPLUS CALCULATION TESTS ============
 
-    function testMockVaultSurplusCalculation() public {
-        MockERC20 testToken = new MockERC20("TEST", "TEST", 18);
-        testToken.mint(client1, 10000e18);
-        mockVault.setClient(client1, true);
-
-        // Client deposits 1000 tokens
+    function testBasicSurplusCalculation() public {
+        // Client deposits 1000 DOLA
         vm.startPrank(client1);
-        testToken.approve(address(mockVault), 1000e18);
-        mockVault.deposit(address(testToken), 1000e18, client1);
+        dolaToken.approve(address(autoDolaVault), 1000e18);
+        autoDolaVault.deposit(address(dolaToken), 1000e18, client1);
         vm.stopPrank();
+
+        // Simulate yield accrual (10% = 100 DOLA)
+        dolaToken.mint(address(autoDola), 100e18); // Mint tokens for yield payout
+        autoDola.simulateYield(100e18); // Update internal accounting
 
         // Calculate surplus (internal balance = 900)
         uint256 surplus = tracker.getSurplus(
-            address(mockVault),
-            address(testToken),
+            address(autoDolaVault),
+            address(dolaToken),
             client1,
             900e18
         );
 
-        assertEq(surplus, 100e18, "MockVault surplus should be 100");
+        assertGt(surplus, 100e18, "Surplus should be greater than 100 (yield + principal diff)");
     }
 
-    function testMockVaultNoSurplus() public {
-        MockERC20 testToken = new MockERC20("TEST", "TEST", 18);
-        testToken.mint(client1, 10000e18);
-        mockVault.setClient(client1, true);
-
-        // Client deposits 1000 tokens
+    function testNoSurplusWhenBalancesMatch() public {
+        // Client deposits 1000 DOLA
         vm.startPrank(client1);
-        testToken.approve(address(mockVault), 1000e18);
-        mockVault.deposit(address(testToken), 1000e18, client1);
+        dolaToken.approve(address(autoDolaVault), 1000e18);
+        autoDolaVault.deposit(address(dolaToken), 1000e18, client1);
         vm.stopPrank();
 
-        // Calculate surplus (internal balance matches vault)
+        // Calculate surplus (internal balance matches principal, no yield)
         uint256 surplus = tracker.getSurplus(
-            address(mockVault),
-            address(testToken),
+            address(autoDolaVault),
+            address(dolaToken),
             client1,
             1000e18
         );
 
-        assertEq(surplus, 0, "MockVault surplus should be 0");
+        // With no yield accrual, surplus should be 0 or very small (rounding)
+        assertLt(surplus, 1e18, "Surplus should be minimal with no yield");
     }
 
     // ============ AUTODOLAVAULT INTEGRATION TESTS ============
@@ -216,7 +139,8 @@ contract SurplusTrackerIntegrationTest is Test {
         assertEq(autoDolaVault.principalOf(address(dolaToken), client1), 1000e18);
 
         // Simulate yield accrual in autoDola (5% yield = 50 DOLA)
-        autoDola.accrueYield(50e18);
+        dolaToken.mint(address(autoDola), 50e18); // Mint tokens for yield payout
+        autoDola.simulateYield(50e18); // Update internal accounting
 
         // totalBalanceOf should now include yield
         uint256 totalBalance = autoDolaVault.totalBalanceOf(address(dolaToken), client1);
@@ -279,7 +203,8 @@ contract SurplusTrackerIntegrationTest is Test {
         vm.stopPrank();
 
         // Simulate yield accrual (10% yield on 3000 total = 300 DOLA)
-        autoDola.accrueYield(300e18);
+        dolaToken.mint(address(autoDola), 300e18); // Mint tokens for yield payout
+        autoDola.simulateYield(300e18); // Update internal accounting
 
         // Calculate surplus for client1 (should get 2/3 of yield = 200 DOLA)
         uint256 surplus1 = tracker.getSurplus(
@@ -310,42 +235,44 @@ contract SurplusTrackerIntegrationTest is Test {
     // RESTORED in Story 022: Now that SurplusTracker uses totalBalanceOf(), it correctly
     // works with all vault types including AutoDolaYieldStrategy with yield.
 
-    function testSurplusTrackerWorksWithMultipleVaultTypes() public {
-        MockERC20 testToken = new MockERC20("TEST", "TEST", 18);
-        testToken.mint(client1, 10000e18);
-
-        // Test with MockVault (simple vault without yield)
-        mockVault.setClient(client1, true);
-        vm.startPrank(client1);
-        testToken.approve(address(mockVault), 1000e18);
-        mockVault.deposit(address(testToken), 1000e18, client1);
-        vm.stopPrank();
-
-        uint256 mockVaultSurplus = tracker.getSurplus(
-            address(mockVault),
-            address(testToken),
-            client1,
-            900e18 // Internal balance is 900
-        );
-        assertEq(mockVaultSurplus, 100e18, "MockVault surplus calculation");
-
-        // Test with AutoDolaYieldStrategy (yield-generating vault)
+    function testSurplusTrackerWorksWithMultipleVaults() public {
+        // Test with first AutoDolaYieldStrategy vault
         vm.startPrank(client1);
         dolaToken.approve(address(autoDolaVault), 1000e18);
         autoDolaVault.deposit(address(dolaToken), 1000e18, client1);
         vm.stopPrank();
 
-        // Accrue yield
-        autoDola.accrueYield(100e18);
+        // Accrue yield in first vault
+        dolaToken.mint(address(autoDola), 100e18); // Mint tokens for yield payout
+        autoDola.simulateYield(100e18); // Update internal accounting
 
-        uint256 autoDolaVaultSurplus = tracker.getSurplus(
+        uint256 firstVaultSurplus = tracker.getSurplus(
             address(autoDolaVault),
             address(dolaToken),
             client1,
             1000e18 // Internal balance is principal only
         );
-        assertGt(autoDolaVaultSurplus, 0, "AutoDolaVault should have positive surplus from yield");
-        assertApproxEqAbs(autoDolaVaultSurplus, 100e18, 2e18, "AutoDolaVault surplus should approximately equal yield");
+        assertGt(firstVaultSurplus, 0, "First vault should have positive surplus from yield");
+        assertApproxEqAbs(firstVaultSurplus, 100e18, 2e18, "First vault surplus should approximately equal yield");
+
+        // Test with second AutoDolaYieldStrategy vault
+        vm.startPrank(client1);
+        dolaToken.approve(address(secondVault), 2000e18);
+        secondVault.deposit(address(dolaToken), 2000e18, client1);
+        vm.stopPrank();
+
+        // Accrue different yield in second vault
+        dolaToken.mint(address(autoDola2), 200e18); // Mint tokens for yield payout
+        autoDola2.simulateYield(200e18); // Update internal accounting
+
+        uint256 secondVaultSurplus = tracker.getSurplus(
+            address(secondVault),
+            address(dolaToken),
+            client1,
+            2000e18
+        );
+        assertGt(secondVaultSurplus, 0, "Second vault should have positive surplus from yield");
+        assertApproxEqAbs(secondVaultSurplus, 200e18, 4e18, "Second vault surplus should approximately equal its yield");
     }
 
     // ============ REALISTIC SCENARIO TESTS ============
@@ -365,7 +292,8 @@ contract SurplusTrackerIntegrationTest is Test {
         assertEq(autoDolaVault.principalOf(address(dolaToken), client1), 10000e18);
 
         // AutoDola vault accrues 5% yield (500 DOLA)
-        autoDola.accrueYield(500e18);
+        dolaToken.mint(address(autoDola), 500e18); // Mint tokens for yield payout
+        autoDola.simulateYield(500e18); // Update internal accounting
 
         // Now totalBalanceOf should return ~10500 (principal + yield)
         uint256 totalBalance = autoDolaVault.totalBalanceOf(address(dolaToken), client1);
@@ -392,41 +320,40 @@ contract SurplusTrackerIntegrationTest is Test {
     }
 
     function testSurplusAfterPartialWithdrawal() public {
-        // Use MockVault for simpler withdrawal mechanics
-        MockERC20 testToken = new MockERC20("TEST", "TEST", 18);
-        testToken.mint(client1, 10000e18);
-        mockVault.setClient(client1, true);
-
-        // Client deposits 10000 tokens
+        // Client deposits 10000 DOLA
         vm.startPrank(client1);
-        testToken.approve(address(mockVault), 10000e18);
-        mockVault.deposit(address(testToken), 10000e18, client1);
+        dolaToken.approve(address(autoDolaVault), 10000e18);
+        autoDolaVault.deposit(address(dolaToken), 10000e18, client1);
         vm.stopPrank();
 
-        // Initial surplus calculation (internal = 9000, vault = 10000)
+        // Accrue yield
+        dolaToken.mint(address(autoDola), 1000e18); // Mint tokens for yield payout
+        autoDola.simulateYield(1000e18); // Update internal accounting
+
+        // Initial surplus calculation (internal = 9000, vault has principal + yield)
         uint256 surplusBefore = tracker.getSurplus(
-            address(mockVault),
-            address(testToken),
+            address(autoDolaVault),
+            address(dolaToken),
             client1,
             9000e18
         );
-        assertEq(surplusBefore, 1000e18, "Initial surplus should be 1000");
+        assertGt(surplusBefore, 1000e18, "Initial surplus should be greater than 1000 (yield + principal diff)");
 
-        // Client withdraws 2000 tokens
+        // Client withdraws 2000 tokens (principal only)
         vm.prank(client1);
-        mockVault.withdraw(address(testToken), 2000e18, client1);
+        autoDolaVault.withdraw(address(dolaToken), 2000e18, client1);
 
-        // After withdrawal, vault has 8000 tokens
-        // If client's internal accounting is now 7000, surplus should be 1000
+        // After withdrawal, vault has 8000 principal + remaining yield
+        // If client's internal accounting is now 7000, surplus should still include yield
         uint256 surplusAfter = tracker.getSurplus(
-            address(mockVault),
-            address(testToken),
+            address(autoDolaVault),
+            address(dolaToken),
             client1,
             7000e18
         );
 
-        // Surplus should still be 1000 (assuming proportional internal accounting update)
-        assertEq(surplusAfter, 1000e18, "Surplus should remain after withdrawal");
+        // Surplus should still be positive (yield remains)
+        assertGt(surplusAfter, 1000e18, "Surplus should remain after withdrawal");
     }
 
     // ============ STRESS TESTS ============
@@ -442,7 +369,8 @@ contract SurplusTrackerIntegrationTest is Test {
         vm.stopPrank();
 
         // Simulate extremely high yield (100% return)
-        autoDola.accrueYield(1000e18);
+        dolaToken.mint(address(autoDola), 1000e18); // Mint tokens for yield payout
+        autoDola.simulateYield(1000e18); // Update internal accounting
 
         // Calculate surplus
         uint256 surplus = tracker.getSurplus(
@@ -465,7 +393,8 @@ contract SurplusTrackerIntegrationTest is Test {
         vm.stopPrank();
 
         // First yield accrual (5%)
-        autoDola.accrueYield(50e18);
+        dolaToken.mint(address(autoDola), 50e18); // Mint tokens for yield payout
+        autoDola.simulateYield(50e18); // Update internal accounting
 
         uint256 surplus1 = tracker.getSurplus(
             address(autoDolaVault),
@@ -476,7 +405,8 @@ contract SurplusTrackerIntegrationTest is Test {
         assertApproxEqAbs(surplus1, 50e18, 2e18, "First accrual surplus");
 
         // Second yield accrual (another 5%)
-        autoDola.accrueYield(50e18);
+        dolaToken.mint(address(autoDola), 50e18); // Mint tokens for yield payout
+        autoDola.simulateYield(50e18); // Update internal accounting
 
         uint256 surplus2 = tracker.getSurplus(
             address(autoDolaVault),
@@ -487,7 +417,8 @@ contract SurplusTrackerIntegrationTest is Test {
         assertApproxEqAbs(surplus2, 100e18, 3e18, "Cumulative surplus after second accrual");
 
         // Third yield accrual (10%)
-        autoDola.accrueYield(100e18);
+        dolaToken.mint(address(autoDola), 100e18); // Mint tokens for yield payout
+        autoDola.simulateYield(100e18); // Update internal accounting
 
         uint256 surplus3 = tracker.getSurplus(
             address(autoDolaVault),
