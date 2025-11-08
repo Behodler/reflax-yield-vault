@@ -139,7 +139,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         }
 
         // Calculate proportional share of total vault value
-        uint256 totalShares = autoDolaVault.balanceOf(address(this));
+        uint256 totalShares = mainRewarder.balanceOf(address(this));
         uint256 totalValue = autoDolaVault.convertToAssets(totalShares);
 
         // User's proportion: (userPrincipal / totalPrincipal) * totalValue
