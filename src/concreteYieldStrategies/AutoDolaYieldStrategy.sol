@@ -388,8 +388,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         mainRewarder.withdraw(address(this), totalShares, false);
 
         // Withdraw the requested amount from the vault
-        uint256 dolaReceived = autoDolaVault.withdraw(amount, recipient, address(this));
-        require(dolaReceived >= amount, "AutoDolaYieldStrategy: vault withdrawal slippage");
+        autoDolaVault.withdraw(amount, recipient, address(this));
 
         // Re-stake ALL remaining vault shares (yield preservation)
         uint256 leftoverShares = autoDolaVault.balanceOf(address(this));

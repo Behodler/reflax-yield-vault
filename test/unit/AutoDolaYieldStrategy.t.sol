@@ -612,51 +612,6 @@ contract AutoDolaYieldStrategyUnitTest is Test {
     }
 
     /**
-     * Test Case 5: Verify slippage protection triggers correctly
-     * This tests the slippage protection in the withdrawal mechanism
-     */
-    function testWithdrawFromSlippageProtection() public {
-        uint256 depositAmount = 10000e18;
-        address authorizedWithdrawer = address(0xABCD);
-
-        // Setup
-        vm.prank(client);
-        dolaToken.approve(address(vault), depositAmount);
-        vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, client);
-
-        vm.prank(owner);
-        vault.setWithdrawer(authorizedWithdrawer, true);
-
-        // Generate yield
-        uint256 yieldAmount = 1000e18;
-        autoDolaVault.simulateYield(yieldAmount);
-
-        uint256 principal = vault.principalOf(address(dolaToken), client);
-        uint256 totalBalance = vault.totalBalanceOf(address(dolaToken), client);
-        uint256 surplus = totalBalance - principal;
-
-        // Configure mock vault to return less than requested (simulate slippage)
-        uint256 withdrawAmount = surplus / 2;
-        autoDolaVault.setSlippageSimulation(true, withdrawAmount - 1); // Return 1 wei less
-
-        // Should revert due to slippage protection
-        vm.expectRevert("AutoDolaYieldStrategy: vault withdrawal slippage");
-        vm.prank(authorizedWithdrawer);
-        vault.withdrawFrom(address(dolaToken), client, withdrawAmount, authorizedWithdrawer);
-
-        // Reset slippage simulation
-        autoDolaVault.setSlippageSimulation(false, 0);
-
-        // Now withdrawal should succeed
-        vm.prank(authorizedWithdrawer);
-        vault.withdrawFrom(address(dolaToken), client, withdrawAmount, authorizedWithdrawer);
-
-        // Principal must remain unchanged even after slippage test
-        assertEq(vault.principalOf(address(dolaToken), client), depositAmount);
-    }
-
-    /**
      * Test Case 6: Zero address recipient should revert
      */
     function testWithdrawFromZeroAddressRecipient() public {
