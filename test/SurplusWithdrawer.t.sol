@@ -4,18 +4,24 @@ pragma solidity ^0.8.13;
 import "forge-std/Test.sol";
 import "../src/SurplusWithdrawer.sol";
 import "../src/SurplusTracker.sol";
-import "../src/mocks/MockVault.sol";
+import "../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
+import "../src/mocks/MockAutoDOLA.sol";
+import "../src/mocks/MockMainRewarder.sol";
 
 /**
  * @title SurplusWithdrawerTest
  * @notice Comprehensive unit tests for SurplusWithdrawer contract
+ * @dev Uses AutoDolaYieldStrategy (real implementation) with mocked external dependencies
  */
 contract SurplusWithdrawerTest is Test {
     SurplusWithdrawer public withdrawer;
     SurplusTracker public tracker;
-    MockVault public vault;
+    AutoDolaYieldStrategy public vault;
     MockERC20 public token;
+    MockERC20 public tokeToken;
+    MockAutoDOLA public autoDolaVault;
+    MockMainRewarder public mainRewarder;
 
     address public owner;
     address public client;
@@ -44,21 +50,60 @@ contract SurplusWithdrawerTest is Test {
         recipient = address(0x2);
         nonOwner = address(0x3);
 
-        // Deploy contracts
+        // Deploy tracker
         tracker = new SurplusTracker();
-        withdrawer = new SurplusWithdrawer(address(tracker), owner);
-        vault = new MockVault(owner);
+
+        // Deploy mock tokens
         token = new MockERC20("Test Token", "TEST", 18);
+        tokeToken = new MockERC20("TOKE", "TOKE", 18);
+
+        // Deploy mock external dependencies
+        mainRewarder = new MockMainRewarder(address(tokeToken));
+        autoDolaVault = new MockAutoDOLA(address(token), address(mainRewarder));
+
+        // Deploy the real AutoDolaYieldStrategy
+        vault = new AutoDolaYieldStrategy(
+            owner,
+            address(token),
+            address(tokeToken),
+            address(autoDolaVault),
+            address(mainRewarder)
+        );
+
+        // Deploy withdrawer
+        withdrawer = new SurplusWithdrawer(address(tracker), owner);
 
         // Setup vault
         vault.setClient(client, true);
         vault.setWithdrawer(address(withdrawer), true);
 
-        // Configure withdrawer with token, vault, yieldStrategy, and client (vault acts as yieldStrategy in mock)
+        // Configure withdrawer with token, vault, yieldStrategy, and client
         withdrawer.configure(address(token), address(vault), address(vault), client);
 
-        // Mint tokens to client for testing
+        // Mint tokens to client and autoDolaVault for testing
         token.mint(client, 10000e18);
+        token.mint(address(autoDolaVault), 10000e18); // For autoDOLA mock
+    }
+
+    // ============ HELPER FUNCTIONS ============
+
+    /**
+     * @notice Helper to set up a specific principal and surplus scenario
+     * @dev Deposits principal amount and simulates yield to create surplus
+     * @param principalAmount The amount to deposit as principal
+     * @param surplusAmount The additional yield to simulate
+     */
+    function setupPrincipalAndSurplus(uint256 principalAmount, uint256 surplusAmount) internal {
+        // Deposit principal
+        vm.startPrank(client);
+        token.approve(address(vault), principalAmount);
+        vault.deposit(address(token), principalAmount, client);
+        vm.stopPrank();
+
+        // Simulate yield if surplus is needed
+        if (surplusAmount > 0) {
+            autoDolaVault.simulateYield(surplusAmount);
+        }
     }
 
     // ============ CONSTRUCTOR TESTS ============
@@ -142,7 +187,16 @@ contract SurplusWithdrawerTest is Test {
 
         // Create new token, vault, and client
         MockERC20 newToken = new MockERC20("New Token", "NEW", 18);
-        MockVault newVault = new MockVault(owner);
+        MockERC20 newTokeToken = new MockERC20("TOKE2", "TOKE2", 18);
+        MockMainRewarder newRewarder = new MockMainRewarder(address(newTokeToken));
+        MockAutoDOLA newAutoDolaVault = new MockAutoDOLA(address(newToken), address(newRewarder));
+        AutoDolaYieldStrategy newVault = new AutoDolaYieldStrategy(
+            owner,
+            address(newToken),
+            address(newTokeToken),
+            address(newAutoDolaVault),
+            address(newRewarder)
+        );
         address newClient = address(0x99);
 
         // Update configuration
@@ -206,14 +260,8 @@ contract SurplusWithdrawerTest is Test {
     }
 
     function testWithdrawSurplusPercentAllowsPercentage1() public {
-        // Setup: Client has 1000 tokens in vault but principal is 900 (100 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
-
-        // Set principal to 900 to simulate 100 surplus
-        vault.setPrincipal(address(token), client, 900e18);
+        // Setup: Client has principal of 900 and surplus of 100 (total 1000)
+        setupPrincipalAndSurplus(900e18, 100e18);
 
         // Withdraw 1% (boundary test)
         uint256 amount = withdrawer.withdrawSurplusPercent(1, recipient);
@@ -224,14 +272,8 @@ contract SurplusWithdrawerTest is Test {
     }
 
     function testWithdrawSurplusPercentAllowsPercentage100() public {
-        // Setup: Client has 1000 tokens in vault but principal is 900 (100 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
-
-        // Set principal to 900 to simulate 100 surplus
-        vault.setPrincipal(address(token), client, 900e18);
+        // Setup: Client has principal of 900 and surplus of 100 (total 1000)
+        setupPrincipalAndSurplus(900e18, 100e18);
 
         // Withdraw 100% (boundary test)
         uint256 amount = withdrawer.withdrawSurplusPercent(100, recipient);
@@ -244,14 +286,8 @@ contract SurplusWithdrawerTest is Test {
     // ============ PERCENTAGE CALCULATION TESTS ============
 
     function testWithdrawSurplusPercent50Percent() public {
-        // Setup: Client has 1000 tokens in vault but principal is 800 (200 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
-
-        // Set principal to 800 to simulate 200 surplus
-        vault.setPrincipal(address(token), client, 800e18);
+        // Setup: Client has principal of 800 and surplus of 200 (total 1000)
+        setupPrincipalAndSurplus(800e18, 200e18);
 
         // Withdraw 50%
         uint256 amount = withdrawer.withdrawSurplusPercent(50, recipient);
@@ -262,14 +298,8 @@ contract SurplusWithdrawerTest is Test {
     }
 
     function testWithdrawSurplusPercent25Percent() public {
-        // Setup: Client has 1000 tokens in vault but principal is 600 (400 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
-
-        // Set principal to 600 to simulate 400 surplus
-        vault.setPrincipal(address(token), client, 600e18);
+        // Setup: Client has principal of 600 and surplus of 400 (total 1000)
+        setupPrincipalAndSurplus(600e18, 400e18);
 
         // Withdraw 25%
         uint256 amount = withdrawer.withdrawSurplusPercent(25, recipient);
@@ -280,14 +310,8 @@ contract SurplusWithdrawerTest is Test {
     }
 
     function testWithdrawSurplusPercent75Percent() public {
-        // Setup: Client has 1000 tokens in vault but principal is 600 (400 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
-
-        // Set principal to 600 to simulate 400 surplus
-        vault.setPrincipal(address(token), client, 600e18);
+        // Setup: Client has principal of 600 and surplus of 400 (total 1000)
+        setupPrincipalAndSurplus(600e18, 400e18);
 
         // Withdraw 75%
         uint256 amount = withdrawer.withdrawSurplusPercent(75, recipient);
@@ -298,14 +322,8 @@ contract SurplusWithdrawerTest is Test {
     }
 
     function testWithdrawSurplusPercentWithLargeSurplus() public {
-        // Setup: Client has 10000 tokens in vault but principal is 5000 (5000 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 10000e18);
-        vault.deposit(address(token), 10000e18, client);
-        vm.stopPrank();
-
-        // Set principal to 5000 to simulate 5000 surplus
-        vault.setPrincipal(address(token), client, 5000e18);
+        // Setup: Client has principal of 5000 and surplus of 5000 (total 10000)
+        setupPrincipalAndSurplus(5000e18, 5000e18);
 
         // Withdraw 30%
         uint256 amount = withdrawer.withdrawSurplusPercent(30, recipient);
@@ -316,14 +334,8 @@ contract SurplusWithdrawerTest is Test {
     }
 
     function testWithdrawSurplusPercentWithSmallSurplus() public {
-        // Setup: Client has 110 tokens in vault but principal is 100 (10 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 110e18);
-        vault.deposit(address(token), 110e18, client);
-        vm.stopPrank();
-
-        // Set principal to 100 to simulate 10 surplus
-        vault.setPrincipal(address(token), client, 100e18);
+        // Setup: Client has principal of 100 and surplus of 10 (total 110)
+        setupPrincipalAndSurplus(100e18, 10e18);
 
         // Withdraw 50%
         uint256 amount = withdrawer.withdrawSurplusPercent(50, recipient);
@@ -336,14 +348,8 @@ contract SurplusWithdrawerTest is Test {
     // ============ INPUT VALIDATION TESTS ============
 
     function testWithdrawSurplusPercentRevertsWithZeroRecipient() public {
-        // Setup: Client has tokens in vault
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
-
-        // Set principal to simulate surplus
-        vault.setPrincipal(address(token), client, 900e18);
+        // Setup: Client has principal of 900 and surplus of 100
+        setupPrincipalAndSurplus(900e18, 100e18);
 
         vm.expectRevert("SurplusWithdrawer: recipient cannot be zero address");
         withdrawer.withdrawSurplusPercent(50, address(0));
@@ -366,14 +372,8 @@ contract SurplusWithdrawerTest is Test {
     // ============ ACCESS CONTROL TESTS ============
 
     function testWithdrawSurplusPercentRevertsWhenCalledByNonOwner() public {
-        // Setup: Client has 1000 tokens in vault but principal is 900 (100 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
-
-        // Set principal to 900 to simulate 100 surplus
-        vault.setPrincipal(address(token), client, 900e18);
+        // Setup: Client has principal of 900 and surplus of 100
+        setupPrincipalAndSurplus(900e18, 100e18);
 
         // Try to withdraw as non-owner
         vm.startPrank(nonOwner);
@@ -383,14 +383,8 @@ contract SurplusWithdrawerTest is Test {
     }
 
     function testWithdrawSurplusPercentSucceedsWhenCalledByOwner() public {
-        // Setup: Client has 1000 tokens in vault but principal is 900 (100 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
-
-        // Set principal to 900 to simulate 100 surplus
-        vault.setPrincipal(address(token), client, 900e18);
+        // Setup: Client has principal of 900 and surplus of 100
+        setupPrincipalAndSurplus(900e18, 100e18);
 
         // Withdraw as owner (owner is address(this))
         uint256 amount = withdrawer.withdrawSurplusPercent(50, recipient);
@@ -401,14 +395,8 @@ contract SurplusWithdrawerTest is Test {
     // ============ EVENT TESTS ============
 
     function testWithdrawSurplusPercentEmitsEvent() public {
-        // Setup: Client has 1000 tokens in vault but principal is 800 (200 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
-
-        // Set principal to 800 to simulate 200 surplus
-        vault.setPrincipal(address(token), client, 800e18);
+        // Setup: Client has principal of 800 and surplus of 200
+        setupPrincipalAndSurplus(800e18, 200e18);
 
         // Expect event
         vm.expectEmit(true, true, true, true);
@@ -428,46 +416,34 @@ contract SurplusWithdrawerTest is Test {
     // ============ INTEGRATION TESTS ============
 
     function testWithdrawSurplusPercentUpdatesVaultBalance() public {
-        // Setup: Client has 1000 tokens in vault but principal is 900 (100 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
+        // Setup: Client has principal of 900 and surplus of 100
+        setupPrincipalAndSurplus(900e18, 100e18);
 
-        // Set principal to 900 to simulate 100 surplus
-        vault.setPrincipal(address(token), client, 900e18);
-
-        // Get initial vault balance
-        uint256 initialVaultBalance = vault.balanceOf(address(token), client);
-        assertEq(initialVaultBalance, 1000e18, "Initial vault balance should be 1000");
+        // Get initial principal (balanceOf returns principal in AutoDolaYieldStrategy)
+        uint256 initialPrincipal = vault.balanceOf(address(token), client);
+        assertEq(initialPrincipal, 900e18, "Initial principal should be 900");
 
         // Withdraw 50% of surplus
         uint256 amount = withdrawer.withdrawSurplusPercent(50, recipient);
 
-        // Get final vault balance
-        uint256 finalVaultBalance = vault.balanceOf(address(token), client);
+        // Get final principal
+        uint256 finalPrincipal = vault.balanceOf(address(token), client);
 
-        // Vault balance should decrease by withdrawal amount
-        assertEq(finalVaultBalance, initialVaultBalance - amount, "Vault balance should decrease by withdrawal amount");
-        assertEq(finalVaultBalance, 950e18, "Vault balance should be 950");
+        // Principal should remain unchanged (withdrawFrom only touches surplus)
+        assertEq(finalPrincipal, initialPrincipal, "Principal should remain unchanged");
+        assertEq(finalPrincipal, 900e18, "Principal should still be 900");
     }
 
     function testMultipleWithdrawalsReduceSurplus() public {
-        // Setup: Client has 1000 tokens in vault but principal is 800 (200 surplus)
-        vm.startPrank(client);
-        token.approve(address(vault), 1000e18);
-        vault.deposit(address(token), 1000e18, client);
-        vm.stopPrank();
-
-        // Set principal to 800 to simulate 200 surplus
+        // Setup: Client has principal of 800 and surplus of 200
+        setupPrincipalAndSurplus(800e18, 200e18);
         uint256 principalBalance = 800e18;
-        vault.setPrincipal(address(token), client, principalBalance);
 
         // First withdrawal: 25% of 200 = 50
         uint256 amount1 = withdrawer.withdrawSurplusPercent(25, recipient);
         assertEq(amount1, 50e18, "First withdrawal should be 50");
 
-        // After first withdrawal: vault balance = 950, surplus = 150
+        // After first withdrawal: surplus = 150
         uint256 surplus1 = tracker.getSurplus(address(vault), address(token), client, principalBalance);
         assertEq(surplus1, 150e18, "Surplus after first withdrawal should be 150");
 
@@ -475,7 +451,7 @@ contract SurplusWithdrawerTest is Test {
         uint256 amount2 = withdrawer.withdrawSurplusPercent(50, recipient);
         assertEq(amount2, 75e18, "Second withdrawal should be 75");
 
-        // After second withdrawal: vault balance = 875, surplus = 75
+        // After second withdrawal: surplus = 75
         uint256 surplus2 = tracker.getSurplus(address(vault), address(token), client, principalBalance);
         assertEq(surplus2, 75e18, "Surplus after second withdrawal should be 75");
 
