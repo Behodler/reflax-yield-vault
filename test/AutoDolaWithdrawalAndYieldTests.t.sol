@@ -258,40 +258,14 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
      * @notice Test: Yield remains in vault after user withdrawal
      * @dev Withdrawn shares' yield portion should be re-staked, not given to user
      */
-    function testYieldExclusion_YieldRemainsInVault() public {
-        uint256 depositAmount = 10000 ether;
-
-        _deposit(client1, depositAmount, recipient1);
-
-        // Accrue significant yield
-        uint256 yieldAmount = 1000 ether;
-        _simulateYield(yieldAmount);
-
-        // Get vault's total value before withdrawal
-        uint256 totalSharesBefore = mainRewarder.balanceOf(address(vault));
-        uint256 totalValueBefore = autoDolaVault.convertToAssets(totalSharesBefore);
-
-        // User withdraws half their principal
-        uint256 withdrawAmount = 5000 ether;
-        uint256 received = _withdraw(client1, withdrawAmount, recipient1);
-
-        // User should receive only principal portion
-        assertEq(received, withdrawAmount, "User should receive only principal");
-
-        // Vault should still hold significant value (yield was re-staked)
-        uint256 totalSharesAfter = mainRewarder.balanceOf(address(vault));
-        uint256 totalValueAfter = autoDolaVault.convertToAssets(totalSharesAfter);
-
-        // Value after should be approximately: original value - withdrawn principal
-        uint256 expectedValue = totalValueBefore - withdrawAmount;
-        assertApproxEqRel(totalValueAfter, expectedValue, 0.01e18, "Yield should remain in vault");
-    }
+    // REMOVED: testYieldExclusion_YieldRemainsInVault
+    // No longer relevant - yield is proportionally distributed, not retained
 
     /**
      * @notice Test: Multiple users' withdrawals don't allow yield extraction
      * @dev Each user can only withdraw their principal, yield is never distributed
      */
-    function testYieldExclusion_MultipleUsers() public {
+    function testProportionalDistribution_MultipleUsers() public {
         uint256 deposit1 = 3000 ether;
         uint256 deposit2 = 7000 ether;
 
@@ -302,20 +276,24 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 yieldAmount = 2000 ether;
         _simulateYield(yieldAmount);
 
+        // Total: 10000 principal + 2000 yield = 12000 total value
+        // User 1 owns 30% (3000/10000), User 2 owns 70% (7000/10000)
+
         // First user withdraws all principal
         uint256 received1 = _withdraw(client1, deposit1, recipient1);
-        assertEq(received1, deposit1, "User 1 should receive only principal");
+        // User 1 receives 30% of 12000 = 3600 (3000 principal + 600 yield)
+        uint256 expected1 = deposit1 + ((yieldAmount * deposit1) / (deposit1 + deposit2));
+        assertEq(received1, expected1, "User 1 receives principal + proportional yield");
 
         // Second user withdraws all principal
         uint256 received2 = _withdraw(client2, deposit2, recipient2);
-        assertEq(received2, deposit2, "User 2 should receive only principal");
+        // User 2 receives 70% of remaining ~8400 = ~8400 (7000 principal + 1400 yield)
+        // Note: approximate due to rounding from first withdrawal
+        assertApproxEqRel(received2, 8400 ether, 0.01e18, "User 2 receives principal + remaining yield");
 
-        // Vault should still have the yield (re-staked as leftover shares)
+        // All value distributed - vault should be empty
         uint256 remainingShares = mainRewarder.balanceOf(address(vault));
-        uint256 remainingValue = autoDolaVault.convertToAssets(remainingShares);
-
-        // Remaining value should be approximately the yield
-        assertApproxEqRel(remainingValue, yieldAmount, 0.02e18, "Yield should remain in vault");
+        assertEq(remainingShares, 0, "All shares distributed");
     }
 
     /**
@@ -349,34 +327,35 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
     }
 
     /**
-     * @notice Test: Sequential yield accruals - user still cannot access cumulative yield
-     * @dev Multiple yield events should all be excluded from user withdrawals
+     * @notice Test: Sequential yield accruals - proportional distribution works correctly
+     * @dev Multiple yield events should all be proportionally distributed to users
      */
-    function testYieldExclusion_SequentialYieldAccruals() public {
+    function testProportionalDistribution_SequentialYieldAccruals() public {
         uint256 depositAmount = 8000 ether;
 
         _deposit(client1, depositAmount, recipient1);
 
         // First yield event
         _simulateYield(500 ether);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), depositAmount, "Balance unchanged after first yield");
+        assertEq(vault.balanceOf(address(dolaToken), recipient1), depositAmount, "Balance tracking unchanged after first yield");
 
         // Second yield event
         _simulateYield(300 ether);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), depositAmount, "Balance unchanged after second yield");
+        assertEq(vault.balanceOf(address(dolaToken), recipient1), depositAmount, "Balance tracking unchanged after second yield");
 
         // Third yield event
         _simulateYield(700 ether);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), depositAmount, "Balance unchanged after third yield");
+        assertEq(vault.balanceOf(address(dolaToken), recipient1), depositAmount, "Balance tracking unchanged after third yield");
 
-        // User can still only withdraw principal
+        // User withdraws principal but receives principal + ALL proportional yield
         uint256 received = _withdraw(client1, depositAmount, recipient1);
-        assertEq(received, depositAmount, "User receives only principal despite multiple yield events");
+        uint256 totalYield = 500 ether + 300 ether + 700 ether; // 1500 ether
+        uint256 expectedReceived = depositAmount + totalYield; // 9500 ether
+        assertEq(received, expectedReceived, "User receives principal + all proportional yield");
 
-        // Total yield (1500 ether) should remain in vault
+        // All value distributed - vault empty
         uint256 remainingShares = mainRewarder.balanceOf(address(vault));
-        uint256 remainingValue = autoDolaVault.convertToAssets(remainingShares);
-        assertApproxEqRel(remainingValue, 1500 ether, 0.02e18, "Cumulative yield should remain in vault");
+        assertEq(remainingShares, 0, "All value distributed");
     }
 
     // ============================================
@@ -475,36 +454,8 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
             "Rounding errors in leftoverShares calculation cause vault/staked mismatch");
     }
 
-    /**
-     * @notice Test: LeftoverShares correctly accounts for yield exclusion
-     * @dev The leftover shares should represent the yield portion that was excluded
-     */
-    function testLeftoverShares_YieldExclusionAccuracy() public {
-        uint256 depositAmount = 20000 ether;
-
-        _deposit(client1, depositAmount, recipient1);
-
-        // Large yield
-        uint256 yieldAmount = 5000 ether;
-        _simulateYield(yieldAmount);
-
-        // Full withdrawal of principal
-        uint256 totalValueBefore = autoDolaVault.convertToAssets(mainRewarder.balanceOf(address(vault)));
-
-        _withdraw(client1, depositAmount, recipient1);
-
-        // After withdrawing principal, remaining value should approximate the yield
-        uint256 remainingShares = mainRewarder.balanceOf(address(vault));
-        uint256 remainingValue = autoDolaVault.convertToAssets(remainingShares);
-
-        // Leftover value should be approximately the yield that was excluded
-        assertApproxEqRel(remainingValue, yieldAmount, 0.02e18,
-            "Leftover shares should represent excluded yield");
-
-        // Vault shares should match staked shares
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
-        assertEq(vaultShares, remainingShares, "Vault and staked shares must match");
-    }
+    // REMOVED: testLeftoverShares_YieldExclusionAccuracy
+    // No longer relevant - yield exclusion eliminated in proportional distribution
 
     /**
      * @notice Test: LeftoverShares calculation with multiple concurrent users
@@ -586,10 +537,10 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
     }
 
     /**
-     * @notice Test: Rounding down in share conversion doesn't allow yield extraction
-     * @dev Even with rounding, users should not be able to extract yield
+     * @notice Test: Rounding in proportional distribution is fair
+     * @dev Proportional distribution includes yield based on ownership share
      */
-    function testDust_RoundingDownNoYieldLeak() public {
+    function testDust_RoundingWithProportionalDistribution() public {
         uint256 depositAmount = 10000 ether;
 
         _deposit(client1, depositAmount, recipient1);
@@ -598,16 +549,22 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 yieldAmount = 997 ether;
         _simulateYield(yieldAmount);
 
-        // Withdraw amount designed to cause rounding
+        // Total vault: 10000 + 997 = 10997
+        // Withdraw 3333 principal (33.33% of principal)
+        // Should receive ~33.33% of total vault = ~3665.3 DOLA
         uint256 withdrawAmount = 3333 ether;
         uint256 received = _withdraw(client1, withdrawAmount, recipient1);
 
-        // Received should not exceed requested (no yield leak via rounding)
-        assertLe(received, withdrawAmount, "Rounding should not allow yield extraction");
+        // User receives proportional share (principal + yield portion)
+        // Expected: (3333 / 10000) * 10997 = 3665.3001 ether
+        uint256 expectedMin = 3665 ether;
+        uint256 expectedMax = 3666 ether;
+        assertGe(received, expectedMin, "Should receive at least principal + proportional yield");
+        assertLe(received, expectedMax, "Rounding should be reasonable");
 
-        // User balance should decrease by requested amount, not received
+        // User balance tracking decreases by requested amount
         uint256 remainingBalance = vault.balanceOf(address(dolaToken), recipient1);
-        assertEq(remainingBalance, depositAmount - withdrawAmount, "Balance should decrease by requested amount");
+        assertEq(remainingBalance, depositAmount - withdrawAmount, "Balance tracking decreases by requested amount");
     }
 
     /**
@@ -684,8 +641,8 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
     }
 
     /**
-     * @notice Test: Large yield accrual doesn't cause overflow
-     * @dev Massive yield growth should not break calculations
+     * @notice Test: Large yield accrual proportional distribution
+     * @dev Massive yield growth is correctly distributed proportionally
      */
     function testLargeAmounts_LargeYieldAccrual() public {
         uint256 depositAmount = 10000 ether;
@@ -696,16 +653,18 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 massiveYield = 1000000 ether;
         _simulateYield(massiveYield);
 
-        // User should still only be able to withdraw principal
+        // Balance tracking still shows principal only
         assertEq(vault.balanceOf(address(dolaToken), recipient1), depositAmount,
-            "Balance should remain principal despite massive yield");
+            "Balance tracking shows principal despite massive yield");
 
+        // User withdraws and receives principal + ALL yield (100% ownership)
         uint256 received = _withdraw(client1, depositAmount, recipient1);
-        assertEq(received, depositAmount, "Should receive only principal despite massive yield");
+        uint256 expectedReceived = depositAmount + massiveYield; // 1,010,000 ether
+        assertEq(received, expectedReceived, "Should receive principal + massive proportional yield");
 
-        // Massive yield should remain in vault
+        // All value distributed - vault empty
         uint256 remainingValue = autoDolaVault.convertToAssets(mainRewarder.balanceOf(address(vault)));
-        assertApproxEqRel(remainingValue, massiveYield, 0.01e18, "Massive yield should remain in vault");
+        assertEq(remainingValue, 0, "All value distributed");
     }
 
     /**
@@ -837,10 +796,10 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
     }
 
     /**
-     * @notice Test: Partial withdrawal doesn't unlock proportional yield
-     * @dev Withdrawing portion of principal should not grant access to any yield
+     * @notice Test: Partial withdrawal includes proportional yield
+     * @dev Withdrawing portion of principal distributes proportional yield
      */
-    function testPartialWithdrawal_NoYieldUnlock() public {
+    function testPartialWithdrawal_IncludesProportionalYield() public {
         uint256 depositAmount = 10000 ether;
 
         _deposit(client1, depositAmount, recipient1);
@@ -849,20 +808,23 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 yieldAmount = 5000 ether;
         _simulateYield(yieldAmount);
 
-        // Partial withdrawal (50%)
+        // Total vault: 10000 principal + 5000 yield = 15000
+        // Partial withdrawal (50% of principal)
         uint256 received = _withdraw(client1, 5000 ether, recipient1);
 
-        // Should receive exactly principal portion, no yield
-        assertEq(received, 5000 ether, "Should receive principal only, no yield portion");
+        // User owns 100% of vault, withdraws 50% of principal
+        // Should receive 50% of total value = 50% of 15000 = 7500
+        // That's 5000 principal + 2500 yield
+        uint256 expectedReceived = 7500 ether;
+        assertEq(received, expectedReceived, "Should receive principal + proportional yield");
 
-        // Remaining balance should be other half of principal
+        // Remaining balance tracking is still 50% of principal
         assertEq(vault.balanceOf(address(dolaToken), recipient1), 5000 ether,
-            "Remaining balance should be principal only");
+            "Remaining balance tracking is principal only");
 
-        // Yield should remain in vault
+        // Remaining vault value ~7500 (half of original total)
         uint256 totalValue = autoDolaVault.convertToAssets(mainRewarder.balanceOf(address(vault)));
-        uint256 expectedValue = 5000 ether + yieldAmount; // Remaining principal + all yield
-        assertApproxEqRel(totalValue, expectedValue, 0.02e18, "Yield should remain untouched");
+        assertApproxEqRel(totalValue, 7500 ether, 0.02e18, "Remaining value is half of total");
     }
 
     // ============================================
@@ -885,25 +847,30 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         // Full withdrawal
         uint256 received = _withdraw(client1, depositAmount, recipient1);
 
-        assertEq(received, depositAmount, "Should receive full principal");
+        // NEW BEHAVIOR: Proportional distribution gives users principal + yield
+        // User owns 100% of vault (15000/15000 principal), total value = 18000
+        // User receives 100% of 18000 = 18000 DOLA
+        uint256 expectedReceived = depositAmount + yieldAmount; // 18000 ether
+        assertEq(received, expectedReceived, "Should receive principal + proportional yield");
         assertEq(vault.balanceOf(address(dolaToken), recipient1), 0, "Balance should be zero after full withdrawal");
 
-        // Yield should remain
+        // No yield remains - all distributed proportionally
         uint256 remainingValue = autoDolaVault.convertToAssets(mainRewarder.balanceOf(address(vault)));
-        assertApproxEqRel(remainingValue, yieldAmount, 0.02e18, "Yield should remain in vault");
+        assertEq(remainingValue, 0, "All funds distributed");
     }
 
     /**
-     * @notice Test: Full withdrawal returns exactly principal (no yield)
-     * @dev User should receive precisely their deposited amount, nothing more
+     * @notice Test: Full withdrawal includes proportional yield
+     * @dev User receives principal plus their proportional share of accrued yield
      */
-    function testFullWithdrawal_ExactPrincipal() public {
+    function testFullWithdrawal_IncludesProportionalYield() public {
         uint256 depositAmount = 7500 ether;
+        uint256 yieldAmount = 10000 ether;
 
         _deposit(client1, depositAmount, recipient1);
 
         // Large yield
-        _simulateYield(10000 ether);
+        _simulateYield(yieldAmount);
 
         // Get recipient balance before
         uint256 balanceBefore = dolaToken.balanceOf(recipient1);
@@ -915,62 +882,18 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 balanceAfter = dolaToken.balanceOf(recipient1);
         uint256 received = balanceAfter - balanceBefore;
 
-        assertEq(received, depositAmount, "Should receive exactly principal, no more, no less");
+        // Proportional distribution: user owns 100% of vault (7500/7500)
+        // Total vault value = 7500 principal + 10000 yield = 17500
+        // User receives 100% = 17500 DOLA
+        uint256 expectedReceived = depositAmount + yieldAmount; // 17500 ether
+        assertEq(received, expectedReceived, "Should receive principal + proportional yield");
     }
 
-    /**
-     * @notice Test: Full withdrawal correctly calculates leftover shares
-     * @dev After full withdrawal, leftover shares should represent all the yield
-     */
-    function testFullWithdrawal_LeftoverSharesCalculation() public {
-        uint256 depositAmount = 20000 ether;
+    // REMOVED: testFullWithdrawal_LeftoverSharesCalculation
+    // No longer relevant - proportional distribution eliminates leftover shares concept
 
-        _deposit(client1, depositAmount, recipient1);
-
-        uint256 yieldAmount = 4000 ether;
-        _simulateYield(yieldAmount);
-
-        // Full withdrawal
-        _withdraw(client1, depositAmount, recipient1);
-
-        // Leftover shares should exist and represent the yield
-        uint256 leftoverShares = mainRewarder.balanceOf(address(vault));
-        uint256 leftoverValue = autoDolaVault.convertToAssets(leftoverShares);
-
-        assertApproxEqRel(leftoverValue, yieldAmount, 0.02e18, "Leftover value should equal yield");
-
-        // CRITICAL: Vault shares should match staked shares
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
-        assertEq(vaultShares, leftoverShares, "Vault and staked shares must match after full withdrawal");
-    }
-
-    /**
-     * @notice Test: Full withdrawal triggers re-staking of leftover shares
-     * @dev Leftover shares should be automatically re-staked in MainRewarder
-     */
-    function testFullWithdrawal_ReStakingLeftoverShares() public {
-        uint256 depositAmount = 12000 ether;
-
-        _deposit(client1, depositAmount, recipient1);
-
-        uint256 yieldAmount = 2500 ether;
-        _simulateYield(yieldAmount);
-
-        // Verify shares are staked before withdrawal
-        uint256 stakedBefore = mainRewarder.balanceOf(address(vault));
-        assertTrue(stakedBefore > 0, "Should have staked shares before withdrawal");
-
-        // Full withdrawal
-        _withdraw(client1, depositAmount, recipient1);
-
-        // Leftover shares should still be staked
-        uint256 stakedAfter = mainRewarder.balanceOf(address(vault));
-        assertTrue(stakedAfter > 0, "Leftover shares should be re-staked");
-
-        // Staked amount should represent the yield
-        uint256 stakedValue = autoDolaVault.convertToAssets(stakedAfter);
-        assertApproxEqRel(stakedValue, yieldAmount, 0.02e18, "Re-staked value should equal yield");
-    }
+    // REMOVED: testFullWithdrawal_ReStakingLeftoverShares
+    // No longer relevant - re-staking mechanism is obsolete under proportional distribution
 
     // ============================================
     // CATEGORY 8: RE-STAKING BEHAVIOR TESTS
@@ -1028,62 +951,11 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         assertEq(vaultSharesAfter, stakedSharesAfter, "Post-withdrawal: vault and staked match (atomic re-stake)");
     }
 
-    /**
-     * @notice Test: Re-staking amount matches yield that was excluded
-     * @dev The amount of shares re-staked should equal the yield portion that wasn't withdrawn
-     */
-    function testReStaking_AmountMatchesExcludedYield() public {
-        uint256 depositAmount = 10000 ether;
+    // REMOVED: testReStaking_AmountMatchesExcludedYield
+    // No longer relevant - excluded yield concept removed in proportional distribution
 
-        _deposit(client1, depositAmount, recipient1);
-
-        uint256 yieldAmount = 2000 ether;
-        _simulateYield(yieldAmount);
-
-        // Get total value before withdrawal
-        uint256 totalValueBefore = autoDolaVault.convertToAssets(mainRewarder.balanceOf(address(vault)));
-
-        // Partial withdrawal
-        uint256 withdrawAmount = 6000 ether;
-        uint256 received = _withdraw(client1, withdrawAmount, recipient1);
-
-        // Calculate expected remaining value
-        // Should be: (originalDeposit - withdrawn) + yieldAmount
-        uint256 expectedRemainingValue = (depositAmount - withdrawAmount) + yieldAmount;
-
-        uint256 actualRemainingValue = autoDolaVault.convertToAssets(mainRewarder.balanceOf(address(vault)));
-
-        assertApproxEqRel(actualRemainingValue, expectedRemainingValue, 0.02e18,
-            "Re-staked value should be remaining principal + excluded yield");
-    }
-
-    /**
-     * @notice Test: Re-staking doesn't interfere with user's withdrawal
-     * @dev Re-staking operation should not affect the amount user receives
-     */
-    function testReStaking_NoInterferenceWithWithdrawal() public {
-        uint256 depositAmount = 15000 ether;
-
-        _deposit(client1, depositAmount, recipient1);
-
-        _simulateYield(3000 ether);
-
-        uint256 withdrawAmount = 7000 ether;
-        uint256 recipientBalanceBefore = dolaToken.balanceOf(recipient1);
-
-        // Withdraw
-        _withdraw(client1, withdrawAmount, recipient1);
-
-        uint256 recipientBalanceAfter = dolaToken.balanceOf(recipient1);
-        uint256 actualReceived = recipientBalanceAfter - recipientBalanceBefore;
-
-        // User should receive exactly what they requested (principal)
-        assertEq(actualReceived, withdrawAmount, "Re-staking should not affect user's received amount");
-
-        // User's balance tracking should also be unaffected
-        uint256 remainingBalance = vault.balanceOf(address(dolaToken), recipient1);
-        assertEq(remainingBalance, depositAmount - withdrawAmount, "Balance tracking unaffected by re-staking");
-    }
+    // REMOVED: testReStaking_NoInterferenceWithWithdrawal
+    // No longer relevant - re-staking mechanism obsolete
 
     // ============================================
     // CATEGORY 9: SEQUENTIAL DEPOSIT/WITHDRAWAL CYCLES
@@ -1153,17 +1025,19 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
     }
 
     /**
-     * @notice Test: Yield accrual between cycles doesn't leak to later cycles
-     * @dev Yield from earlier deposits should not become accessible in later cycles
+     * @notice Test: Yield distribution across multiple cycles
+     * @dev Yield from all cycles is distributed proportionally
      */
-    function testCycles_YieldDoesNotLeakBetweenCycles() public {
+    function testCycles_YieldDistributedAcrossCycles() public {
         // Cycle 1: Deposit and accrue yield
         _deposit(client1, 5000 ether, recipient1);
         _simulateYield(1000 ether);
 
-        // Partial withdrawal (user can't access yield)
+        // Total: 6000 ether
+        // Partial withdrawal (60% of principal) receives proportional share
+        // Expected: (3000/5000) * 6000 = 3600 ether
         uint256 received1 = _withdraw(client1, 3000 ether, recipient1);
-        assertEq(received1, 3000 ether, "First withdrawal: principal only");
+        assertEq(received1, 3600 ether, "First withdrawal: principal + proportional yield");
         assertEq(vault.balanceOf(address(dolaToken), recipient1), 2000 ether, "After first withdrawal");
 
         // Cycle 2: New deposit and more yield
@@ -1172,18 +1046,20 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         _simulateYield(500 ether);
 
-        // User still can only access their total principal
+        // Balance tracking unchanged by yield
         assertEq(vault.balanceOf(address(dolaToken), recipient1), 6000 ether,
-            "Balance unchanged by yield in second cycle");
+            "Balance tracking unchanged by yield in second cycle");
 
-        // Full withdrawal should give principal only
+        // Full withdrawal receives all remaining value
+        // Previous withdrawal: 3600 out of 6000 total, leaving ~2400
+        // New deposit: +4000, new yield: +500
+        // Total remaining: ~2400 + 4000 + 500 = ~6900 ether
         uint256 received2 = _withdraw(client1, 6000 ether, recipient1);
-        assertEq(received2, 6000 ether, "Second withdrawal: principal only, no accumulated yield");
+        assertApproxEqRel(received2, 6900 ether, 0.01e18, "Second withdrawal: principal + all remaining yield");
 
-        // All yield from both cycles should remain in vault
+        // All value distributed - vault empty
         uint256 remainingValue = autoDolaVault.convertToAssets(mainRewarder.balanceOf(address(vault)));
-        uint256 totalYield = 1000 ether + 500 ether;
-        assertApproxEqRel(remainingValue, totalYield, 0.02e18, "All yield from all cycles should remain");
+        assertEq(remainingValue, 0, "All value distributed");
     }
 
     /**

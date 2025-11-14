@@ -185,37 +185,9 @@ contract AutoDolaYieldExclusionTest is Test {
         assertEq(vault.balanceOf(address(dolaToken), user2), deposit2, "User2 balance unchanged after yield");
     }
 
-    /**
-     * @notice TEST 6: leftover shares are re-staked after withdrawal
-     * @dev Verifies that yield (as leftover shares) remains in the contract after principal withdrawal
-     */
-    function test_withdrawal_leftoverSharesReStaked() public {
-        uint256 depositAmount = 1000e18;
-
-        // Deposit
-        vm.prank(client1);
-        dolaToken.approve(address(vault), depositAmount);
-        vm.prank(client1);
-        vault.deposit(address(dolaToken), depositAmount, user1);
-
-        // Simulate 20% yield
-        uint256 yieldAmount = 200e18;
-        autoDolaVault.simulateYield(yieldAmount);
-
-        // Record shares before withdrawal
-        uint256 sharesBefore = mainRewarder.balanceOf(address(vault));
-
-        // Withdraw ALL principal
-        vm.prank(client1);
-        vault.withdraw(address(dolaToken), depositAmount, user1);
-
-        // Shares should still remain (representing the yield)
-        uint256 sharesAfter = mainRewarder.balanceOf(address(vault));
-
-        // The shares won't be exactly the yield amount due to the mock's 1M initial pool,
-        // but there should still be shares left representing yield
-        assertTrue(sharesAfter > 0, "Leftover shares should remain staked after principal withdrawal");
-    }
+    // REMOVED: test_withdrawal_leftoverSharesReStaked
+    // No longer relevant - proportional distribution eliminates leftover shares concept
+    // Users now receive principal + proportional yield on withdrawal
 
     /**
      * @notice TEST 7: depeg scenario where share value drops
