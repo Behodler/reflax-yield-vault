@@ -186,7 +186,7 @@ contract AutoDolaVaultTest is Test {
         vault.withdraw(address(dolaToken), withdrawAmount, address(0));
 
         // Test insufficient balance
-        vm.expectRevert("AutoDolaYieldStrategy: insufficient balance");
+        vm.expectRevert("AutoDolaYieldStrategy: no shares available");
         vm.prank(client1);
         vault.withdraw(address(dolaToken), withdrawAmount, user1);
     }
