@@ -239,9 +239,12 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         require(totalShares > 0, "AutoDolaYieldStrategy: no shares available");
         mainRewarder.withdraw(address(this), totalShares, false);
 
-        // Withdraw only the requested principal amount (not the full value of shares)
-        // The vault will burn only the shares needed for this amount
-        uint256 dolaReceived = autoDolaVault.withdraw(amount, recipient, address(this));
+        // CRITICAL: Use redeem() instead of withdraw() to avoid ERC4626 rounding issues
+        // ERC4626's withdraw() rounds UP when calculating required shares, creating a ~0.14% precision gap
+        // on full withdrawals. Using redeem() with proportional share calculation eliminates this issue.
+        // Calculate proportional shares: (totalShares * userPrincipal) / totalDeposited
+        uint256 sharesToRedeem = (totalShares * amount) / totalDeposited[token];
+        uint256 dolaReceived = autoDolaVault.redeem(sharesToRedeem, recipient, address(this));
 
         // CRITICAL FIX: Re-stake ALL remaining vault shares (yield preservation)
         // Query vault balance AFTER withdrawal to get actual remaining shares
@@ -387,8 +390,12 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         require(totalShares > 0, "AutoDolaYieldStrategy: no shares available");
         mainRewarder.withdraw(address(this), totalShares, false);
 
-        // Withdraw the requested amount from the vault
-        autoDolaVault.withdraw(amount, recipient, address(this));
+        // CRITICAL: Use redeem() instead of withdraw() to avoid ERC4626 rounding issues
+        // For surplus withdrawals, convert the requested amount to shares using convertToShares()
+        // This differs from withdraw() which uses proportional calculation since surplus is
+        // not tracked in principal accounting
+        uint256 sharesToRedeem = autoDolaVault.convertToShares(amount);
+        autoDolaVault.redeem(sharesToRedeem, recipient, address(this));
 
         // Re-stake ALL remaining vault shares (yield preservation)
         uint256 leftoverShares = autoDolaVault.balanceOf(address(this));
