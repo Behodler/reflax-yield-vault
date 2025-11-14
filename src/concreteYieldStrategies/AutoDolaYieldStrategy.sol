@@ -226,40 +226,56 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @param recipient The address that will receive the tokens
      * @dev Only authorized clients can call this function
      *      Withdraws only principal, leaving yield locked in the contract
-     *      Returns actual withdrawn amount via event for slippage monitoring
+     *      Uses ERC4626 convertToShares for standard compliance
+     *      Caps amount to available principal to prevent dust-related reverts
+     *
+     *      SECURITY PROPERTIES:
+     *      - Rounding favors protocol: clientBalances decremented by requested amount,
+     *        not actual received amount. Any shortfall accumulates as protocol yield.
+     *      - Yield-exclusion: convertToShares accounts for accrued yield, ensuring
+     *        users receive only principal by redeeming fewer shares when yield present.
+     *      - Dust handling: Amount capped to available balance prevents final withdrawal
+     *        from reverting due to accumulated rounding differences.
      */
     function withdraw(address token, uint256 amount, address recipient) external override onlyAuthorizedClient nonReentrant {
         require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
         require(amount > 0, "AutoDolaYieldStrategy: amount must be greater than zero");
         require(recipient != address(0), "AutoDolaYieldStrategy: recipient cannot be zero address");
-        require(clientBalances[token][recipient] >= amount, "AutoDolaYieldStrategy: insufficient balance");
+
+        // Cap amount to available principal (prevents dust from blocking withdrawal)
+        // This allows the final withdrawal to succeed even with minor rounding differences
+        uint256 availablePrincipal = clientBalances[token][recipient];
+        if (amount > availablePrincipal) {
+            amount = availablePrincipal;
+        }
 
         // Unstake ALL shares to ensure we have them available for withdrawal
         uint256 totalShares = mainRewarder.balanceOf(address(this));
         require(totalShares > 0, "AutoDolaYieldStrategy: no shares available");
         mainRewarder.withdraw(address(this), totalShares, false);
 
-        // CRITICAL: Use redeem() instead of withdraw() to avoid ERC4626 rounding issues
-        // ERC4626's withdraw() rounds UP when calculating required shares, creating a ~0.14% precision gap
-        // on full withdrawals. Using redeem() with proportional share calculation eliminates this issue.
-        // Calculate proportional shares: (totalShares * userPrincipal) / totalDeposited
-        uint256 sharesToRedeem = (totalShares * amount) / totalDeposited[token];
+        // CRITICAL: Use ERC4626 standard convertToShares instead of manual calculation
+        // convertToShares accounts for current share price, ensuring principal-only withdrawal
+        // When yield accrues, shares become more valuable, so fewer shares needed for same DOLA amount
+        // This automatically preserves yield-exclusion without manual proportion tracking
+        uint256 sharesToRedeem = autoDolaVault.convertToShares(amount);
         uint256 dolaReceived = autoDolaVault.redeem(sharesToRedeem, recipient, address(this));
 
         // CRITICAL FIX: Re-stake ALL remaining vault shares (yield preservation)
         // Query vault balance AFTER withdrawal to get actual remaining shares
         // This simple approach avoids calculation errors - just stake whatever's left
         uint256 leftoverShares = autoDolaVault.balanceOf(address(this));
-
         if (leftoverShares > 0) {
             mainRewarder.stake(address(this), leftoverShares);
         }
 
-        // Update principal tracking
+        // SECURITY: Update principal tracking by REQUESTED amount, not RECEIVED amount
+        // This ensures rounding always favors the protocol, preventing exploitation
+        // Any difference (amount - dolaReceived) accumulates as protocol-owned yield
         clientBalances[token][recipient] -= amount;
         totalDeposited[token] -= amount;
 
-        emit DolaWithdrawn(token, msg.sender, recipient, dolaReceived, autoDolaVault.convertToShares(dolaReceived));
+        emit DolaWithdrawn(token, msg.sender, recipient, dolaReceived, sharesToRedeem);
     }
 
     /**
