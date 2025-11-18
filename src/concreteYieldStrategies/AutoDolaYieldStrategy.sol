@@ -259,6 +259,10 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         // When yield accrues, shares become more valuable, so fewer shares needed for same DOLA amount
         // This automatically preserves yield-exclusion without manual proportion tracking
         uint256 sharesToRedeem = autoDolaVault.convertToShares(amount);
+        uint256 availableShares = autoDolaVault.balanceOf(address(this));
+        if (sharesToRedeem > availableShares) {
+            sharesToRedeem = availableShares;
+        }
         uint256 dolaReceived = autoDolaVault.redeem(sharesToRedeem, recipient, address(this));
 
         // CRITICAL FIX: Re-stake ALL remaining vault shares (yield preservation)
@@ -411,6 +415,10 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
         // This differs from withdraw() which uses proportional calculation since surplus is
         // not tracked in principal accounting
         uint256 sharesToRedeem = autoDolaVault.convertToShares(amount);
+        uint256 availableShares = autoDolaVault.balanceOf(address(this));
+        if (sharesToRedeem > availableShares) {
+            sharesToRedeem = availableShares;
+        }
         autoDolaVault.redeem(sharesToRedeem, recipient, address(this));
 
         // Re-stake ALL remaining vault shares (yield preservation)
