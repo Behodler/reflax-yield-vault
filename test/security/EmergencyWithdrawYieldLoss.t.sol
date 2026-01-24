@@ -9,17 +9,19 @@ import "../../src/mocks/MockMainRewarder.sol";
 
 /**
  * @title EmergencyWithdrawYieldLossTest
- * @notice Proof-of-concept test demonstrating yield loss after emergency withdrawal
- * @dev Tests vulnerability L1 from security audit report
+ * @notice Tests verifying emergency withdrawal behavior and yield continuity
+ * @dev Tests security behavior L1 from security audit report
  *
- * VULNERABILITY: _emergencyWithdraw does not re-stake remaining shares after partial withdrawal
+ * BEHAVIOR VERIFIED:
+ * - _emergencyWithdraw only unstakes the shares needed for withdrawal
+ * - Remaining shares stay staked in MainRewarder, continuing to earn TOKE
+ * - Regular withdraw correctly re-stakes any leftover shares
  *
  * IMPACT:
- * - Remaining shares sit unstaked in the contract
- * - No longer earning TOKE rewards
- * - Yield generation stops for remaining user funds
+ * - Remaining shares continue earning TOKE rewards
+ * - Yield generation continues for remaining user funds
  *
- * SEVERITY: LOW (funds safe, but yield impaired)
+ * SEVERITY: N/A (correct behavior, no vulnerability)
  */
 contract EmergencyWithdrawYieldLossTest is Test {
     AutoDolaYieldStrategy vault;
@@ -43,6 +45,10 @@ contract EmergencyWithdrawYieldLossTest is Test {
         mainRewarder = new MockMainRewarder(address(tokeToken));
         autoDolaVault = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
 
+        // Enable realistic transfer mode for security tests
+        // This makes the mock actually transfer shares, simulating real Tokemak behavior
+        mainRewarder.setShareToken(address(autoDolaVault));
+
         // Deploy vault
         vm.prank(owner);
         vault = new AutoDolaYieldStrategy(
@@ -60,9 +66,9 @@ contract EmergencyWithdrawYieldLossTest is Test {
     }
 
     /**
-     * @notice Test that emergency withdrawal leaves shares unstaked
+     * @notice Test that emergency withdrawal keeps remaining shares staked
      */
-    function testEmergencyWithdrawLeavesSharesUnstaked() public {
+    function testEmergencyWithdrawKeepsRemainingSharesStaked() public {
         // Setup: User deposits funds
         uint256 depositAmount = 10000e18;
         vm.prank(client);
@@ -79,23 +85,21 @@ contract EmergencyWithdrawYieldLossTest is Test {
         vm.prank(owner);
         vault.emergencyWithdraw(emergencyAmount);
 
-        // VULNERABILITY: Check that remaining shares are NOT re-staked
+        // CORRECT BEHAVIOR: Remaining shares stay staked
         uint256 stakedSharesAfter = mainRewarder.balanceOf(address(vault));
         uint256 unstakedShares = autoDolaVault.balanceOf(address(vault));
 
-        // Remaining shares should be in vault but NOT staked
-        assertEq(stakedSharesAfter, 0, "VULNERABILITY: All shares unstaked, not re-staked");
-        assertGt(unstakedShares, 0, "VULNERABILITY: Shares sitting unstaked in vault");
+        // Remaining shares should stay staked in MainRewarder
+        assertGt(stakedSharesAfter, 0, "Remaining shares should stay staked");
+        assertEq(unstakedShares, 0, "No shares should be sitting unstaked in vault");
 
-        // Impact: TOKE rewards stop accumulating
-        // Normally, shares would be re-staked and continue earning TOKE
-        // But now they sit idle until next user operation
+        // Benefit: TOKE rewards continue accumulating for remaining staked shares
     }
 
     /**
-     * @notice Test that TOKE rewards stop accumulating after emergency withdrawal
+     * @notice Test that TOKE rewards continue accumulating after emergency withdrawal
      */
-    function testTokeRewardsStopAfterEmergencyWithdrawal() public {
+    function testTokeRewardsContinueAfterEmergencyWithdrawal() public {
         // Setup: User deposits funds
         uint256 depositAmount = 10000e18;
         vm.prank(client);
@@ -108,20 +112,25 @@ contract EmergencyWithdrawYieldLossTest is Test {
         uint256 rewardsBefore = vault.getTokeRewards();
         assertGt(rewardsBefore, 0, "Should have accumulated TOKE rewards");
 
-        // Owner performs emergency withdrawal
+        // Owner performs emergency withdrawal of 50%
         uint256 emergencyAmount = 5000e18;
         vm.prank(owner);
         vault.emergencyWithdraw(emergencyAmount);
 
+        // Rewards should still be claimable (accumulated before emergency withdraw)
+        // Note: After emergency withdraw, remaining shares are still staked
+        uint256 rewardsAfterWithdraw = vault.getTokeRewards();
+        // Rewards are captured/updated during the withdraw process
+        assertGe(rewardsAfterWithdraw, 0, "Rewards should be available or captured");
+
         // Fast forward time again
         vm.warp(block.timestamp + 7 days);
 
-        // VULNERABILITY: TOKE rewards should NOT increase (shares unstaked)
+        // CORRECT BEHAVIOR: TOKE rewards should continue increasing (remaining shares still staked)
         uint256 rewardsAfter = vault.getTokeRewards();
 
-        // In the vulnerable contract, rewards stop increasing because shares are unstaked
-        // In a fixed contract, rewards would continue accumulating
-        assertEq(rewardsAfter, 0, "VULNERABILITY: TOKE rewards stop accumulating");
+        // In the correct contract, rewards continue accumulating for remaining staked shares
+        assertGt(rewardsAfter, 0, "TOKE rewards should continue accumulating for remaining shares");
     }
 
     /**

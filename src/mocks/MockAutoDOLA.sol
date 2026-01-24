@@ -22,6 +22,8 @@ contract MockAutoDOLA is MockERC20 {
         _asset = asset_;
         _rewarder = rewarder_;
         _slippageEnabled = false;
+        // Note: MockMainRewarder defaults to simple mode (no transfers) for backward compatibility
+        // Tests that need realistic transfer behavior should call mainRewarder.setShareToken(autoDola) explicitly
     }
 
     function deposit(uint256 assets, address receiver) external returns (uint256 shares) {
