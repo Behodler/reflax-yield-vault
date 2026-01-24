@@ -46,11 +46,7 @@ contract EmergencyWithdrawYieldLossTest is Test {
         // Deploy vault
         vm.prank(owner);
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(dolaToken),
-            address(tokeToken),
-            address(autoDolaVault),
-            address(mainRewarder)
+            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
         );
 
         // Mint tokens

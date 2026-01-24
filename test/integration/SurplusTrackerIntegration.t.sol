@@ -52,22 +52,14 @@ contract SurplusTrackerIntegrationTest is Test {
 
         // Deploy first AutoDolaYieldStrategy
         autoDolaVault = new AutoDolaYieldStrategy(
-            owner,
-            address(dolaToken),
-            address(tokeToken),
-            address(autoDola),
-            address(mainRewarder)
+            owner, address(dolaToken), address(tokeToken), address(autoDola), address(mainRewarder)
         );
         autoDolaVault.setClient(client1, true);
         autoDolaVault.setClient(client2, true);
 
         // Deploy second AutoDolaYieldStrategy for multi-vault tests
         secondVault = new AutoDolaYieldStrategy(
-            owner,
-            address(dolaToken),
-            address(tokeToken),
-            address(autoDola2),
-            address(mainRewarder2)
+            owner, address(dolaToken), address(tokeToken), address(autoDola2), address(mainRewarder2)
         );
         secondVault.setClient(client1, true);
         secondVault.setClient(client2, true);
@@ -93,12 +85,7 @@ contract SurplusTrackerIntegrationTest is Test {
         autoDola.simulateYield(100e18); // Update internal accounting
 
         // Calculate surplus (internal balance = 900)
-        uint256 surplus = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            900e18
-        );
+        uint256 surplus = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 900e18);
 
         assertGt(surplus, 100e18, "Surplus should be greater than 100 (yield + principal diff)");
     }
@@ -111,12 +98,7 @@ contract SurplusTrackerIntegrationTest is Test {
         vm.stopPrank();
 
         // Calculate surplus (internal balance matches principal, no yield)
-        uint256 surplus = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            1000e18
-        );
+        uint256 surplus = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 1000e18);
 
         // With no yield accrual, surplus should be 0 or very small (rounding)
         assertLt(surplus, 1e18, "Surplus should be minimal with no yield");
@@ -148,12 +130,7 @@ contract SurplusTrackerIntegrationTest is Test {
 
         // Calculate surplus with internal balance = principal (1000)
         // Surplus = totalBalanceOf() - clientInternalBalance
-        uint256 surplus = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            1000e18
-        );
+        uint256 surplus = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 1000e18);
 
         // Surplus should approximately equal the yield (50 DOLA)
         // Use approximate equality due to potential rounding
@@ -178,12 +155,7 @@ contract SurplusTrackerIntegrationTest is Test {
         );
 
         // Calculate surplus with internal balance matching principal
-        uint256 surplus = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            1000e18
-        );
+        uint256 surplus = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 1000e18);
 
         // Surplus should be 0 when no yield has accrued
         assertEq(surplus, 0, "Surplus should be 0 with no yield");
@@ -207,20 +179,10 @@ contract SurplusTrackerIntegrationTest is Test {
         autoDola.simulateYield(300e18); // Update internal accounting
 
         // Calculate surplus for client1 (should get 2/3 of yield = 200 DOLA)
-        uint256 surplus1 = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            2000e18
-        );
+        uint256 surplus1 = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 2000e18);
 
         // Calculate surplus for client2 (should get 1/3 of yield = 100 DOLA)
-        uint256 surplus2 = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client2,
-            1000e18
-        );
+        uint256 surplus2 = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client2, 1000e18);
 
         // Verify proportional surplus distribution
         assertApproxEqAbs(surplus1, 200e18, 2e18, "Client1 should get ~200 DOLA surplus");
@@ -265,12 +227,7 @@ contract SurplusTrackerIntegrationTest is Test {
         dolaToken.mint(address(autoDola2), 200e18); // Mint tokens for yield payout
         autoDola2.simulateYield(200e18); // Update internal accounting
 
-        uint256 secondVaultSurplus = tracker.getSurplus(
-            address(secondVault),
-            address(dolaToken),
-            client1,
-            2000e18
-        );
+        uint256 secondVaultSurplus = tracker.getSurplus(address(secondVault), address(dolaToken), client1, 2000e18);
         assertGt(secondVaultSurplus, 0, "Second vault should have positive surplus from yield");
         assertApproxEqAbs(secondVaultSurplus, 200e18, 4e18, "Second vault surplus should approximately equal its yield");
     }
@@ -303,12 +260,7 @@ contract SurplusTrackerIntegrationTest is Test {
         // Internal balance (virtualInputTokens) = 10000
         // Vault balance (totalBalanceOf) = 10500
         // Surplus = 500 (harvestable yield)
-        uint256 surplus = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            10000e18
-        );
+        uint256 surplus = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 10000e18);
 
         // Verify surplus equals the yield
         assertApproxEqAbs(surplus, 500e18, 10e18, "Surplus should equal accrued yield");
@@ -331,12 +283,7 @@ contract SurplusTrackerIntegrationTest is Test {
         autoDola.simulateYield(1000e18); // Update internal accounting
 
         // Initial surplus calculation (internal = 9000, vault has principal + yield)
-        uint256 surplusBefore = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            9000e18
-        );
+        uint256 surplusBefore = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 9000e18);
         assertGt(surplusBefore, 1000e18, "Initial surplus should be greater than 1000 (yield + principal diff)");
 
         // Client withdraws 2000 tokens (principal only)
@@ -345,12 +292,7 @@ contract SurplusTrackerIntegrationTest is Test {
 
         // After withdrawal, vault has 8000 principal + remaining yield
         // If client's internal accounting is now 7000, surplus should still include yield
-        uint256 surplusAfter = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            7000e18
-        );
+        uint256 surplusAfter = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 7000e18);
 
         // Surplus should still be positive (yield remains)
         assertGt(surplusAfter, 1000e18, "Surplus should remain after withdrawal");
@@ -373,12 +315,7 @@ contract SurplusTrackerIntegrationTest is Test {
         autoDola.simulateYield(1000e18); // Update internal accounting
 
         // Calculate surplus
-        uint256 surplus = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            1000e18
-        );
+        uint256 surplus = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 1000e18);
 
         // Surplus should approximately equal the high yield
         assertApproxEqAbs(surplus, 1000e18, 20e18, "High yield scenario surplus");
@@ -396,36 +333,21 @@ contract SurplusTrackerIntegrationTest is Test {
         dolaToken.mint(address(autoDola), 50e18); // Mint tokens for yield payout
         autoDola.simulateYield(50e18); // Update internal accounting
 
-        uint256 surplus1 = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            1000e18
-        );
+        uint256 surplus1 = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 1000e18);
         assertApproxEqAbs(surplus1, 50e18, 2e18, "First accrual surplus");
 
         // Second yield accrual (another 5%)
         dolaToken.mint(address(autoDola), 50e18); // Mint tokens for yield payout
         autoDola.simulateYield(50e18); // Update internal accounting
 
-        uint256 surplus2 = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            1000e18
-        );
+        uint256 surplus2 = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 1000e18);
         assertApproxEqAbs(surplus2, 100e18, 3e18, "Cumulative surplus after second accrual");
 
         // Third yield accrual (10%)
         dolaToken.mint(address(autoDola), 100e18); // Mint tokens for yield payout
         autoDola.simulateYield(100e18); // Update internal accounting
 
-        uint256 surplus3 = tracker.getSurplus(
-            address(autoDolaVault),
-            address(dolaToken),
-            client1,
-            1000e18
-        );
+        uint256 surplus3 = tracker.getSurplus(address(autoDolaVault), address(dolaToken), client1, 1000e18);
         assertApproxEqAbs(surplus3, 200e18, 5e18, "Cumulative surplus after third accrual");
     }
 }

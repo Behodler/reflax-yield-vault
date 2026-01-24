@@ -43,11 +43,7 @@ contract SurplusTrackerTest is Test {
 
         // Deploy the real AutoDolaYieldStrategy
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(token),
-            address(tokeToken),
-            address(autoDolaVault),
-            address(mainRewarder)
+            owner, address(token), address(tokeToken), address(autoDolaVault), address(mainRewarder)
         );
 
         // Authorize client for vault operations
@@ -71,12 +67,7 @@ contract SurplusTrackerTest is Test {
         uint256 clientInternalBalance = 900e18;
 
         // Calculate surplus
-        uint256 surplus = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            clientInternalBalance
-        );
+        uint256 surplus = tracker.getSurplus(address(vault), address(token), client, clientInternalBalance);
 
         // Surplus should be 1000 - 900 = 100
         assertEq(surplus, 100e18, "Surplus should be 100 tokens");
@@ -93,12 +84,7 @@ contract SurplusTrackerTest is Test {
         uint256 clientInternalBalance = 1000e18;
 
         // Calculate surplus
-        uint256 surplus = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            clientInternalBalance
-        );
+        uint256 surplus = tracker.getSurplus(address(vault), address(token), client, clientInternalBalance);
 
         // Surplus should be 0
         assertEq(surplus, 0, "Surplus should be 0 when balances match");
@@ -115,12 +101,7 @@ contract SurplusTrackerTest is Test {
         uint256 clientInternalBalance = 1100e18;
 
         // Calculate surplus
-        uint256 surplus = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            clientInternalBalance
-        );
+        uint256 surplus = tracker.getSurplus(address(vault), address(token), client, clientInternalBalance);
 
         // Surplus should be 0 (can't be negative)
         assertEq(surplus, 0, "Surplus should be 0 when internal > vault");
@@ -131,12 +112,7 @@ contract SurplusTrackerTest is Test {
         uint256 clientInternalBalance = 0;
 
         // Calculate surplus
-        uint256 surplus = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            clientInternalBalance
-        );
+        uint256 surplus = tracker.getSurplus(address(vault), address(token), client, clientInternalBalance);
 
         // Surplus should be 0
         assertEq(surplus, 0, "Surplus should be 0 with zero vault balance");
@@ -153,12 +129,7 @@ contract SurplusTrackerTest is Test {
         uint256 clientInternalBalance = 0;
 
         // Calculate surplus
-        uint256 surplus = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            clientInternalBalance
-        );
+        uint256 surplus = tracker.getSurplus(address(vault), address(token), client, clientInternalBalance);
 
         // Surplus should be entire vault balance
         assertEq(surplus, 1000e18, "Surplus should be entire vault balance");
@@ -194,12 +165,7 @@ contract SurplusTrackerTest is Test {
         uint256 clientInternalBalance = 0;
 
         // Calculate surplus
-        uint256 surplus = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            clientInternalBalance
-        );
+        uint256 surplus = tracker.getSurplus(address(vault), address(token), client, clientInternalBalance);
 
         // Surplus should be 1 wei
         assertEq(surplus, 1, "Surplus should handle 1 wei correctly");
@@ -221,12 +187,7 @@ contract SurplusTrackerTest is Test {
         uint256 clientInternalBalance = largeAmount / 2;
 
         // Calculate surplus
-        uint256 surplus = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            clientInternalBalance
-        );
+        uint256 surplus = tracker.getSurplus(address(vault), address(token), client, clientInternalBalance);
 
         // Surplus should be largeAmount - (largeAmount/2)
         assertEq(surplus, largeAmount - clientInternalBalance, "Surplus should handle large amounts");
@@ -243,12 +204,7 @@ contract SurplusTrackerTest is Test {
         uint256 clientInternalBalance = type(uint256).max;
 
         // Calculate surplus
-        uint256 surplus = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            clientInternalBalance
-        );
+        uint256 surplus = tracker.getSurplus(address(vault), address(token), client, clientInternalBalance);
 
         // Surplus should be 0 (vault balance < internal)
         assertEq(surplus, 0, "Surplus should be 0 when internal is max");
@@ -308,12 +264,7 @@ contract SurplusTrackerTest is Test {
 
         // Vault now has 800 tokens for client
         // Client's internal accounting shows 750 (some yield accrued)
-        uint256 surplus = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            750e18
-        );
+        uint256 surplus = tracker.getSurplus(address(vault), address(token), client, 750e18);
 
         // Surplus should be 800 - 750 = 50
         assertEq(surplus, 50e18, "Surplus should be correct after withdrawal");
@@ -328,12 +279,7 @@ contract SurplusTrackerTest is Test {
     function testGetSurplusIsViewFunction() public view {
         // This test verifies that getSurplus is a view function
         // by calling it in a view context
-        tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            1000e18
-        );
+        tracker.getSurplus(address(vault), address(token), client, 1000e18);
         // If this compiles and runs, getSurplus is properly view/pure
     }
 
@@ -347,12 +293,7 @@ contract SurplusTrackerTest is Test {
         uint256 vaultBalanceBefore = vault.balanceOf(address(token), client);
 
         // Call getSurplus
-        tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            900e18
-        );
+        tracker.getSurplus(address(vault), address(token), client, 900e18);
 
         uint256 vaultBalanceAfter = vault.balanceOf(address(token), client);
 
@@ -362,10 +303,7 @@ contract SurplusTrackerTest is Test {
 
     // ============ FUZZ TESTS ============
 
-    function testFuzzGetSurplus(
-        uint96 vaultAmount,
-        uint96 internalAmount
-    ) public {
+    function testFuzzGetSurplus(uint96 vaultAmount, uint96 internalAmount) public {
         // Bound inputs to reasonable values
         vm.assume(vaultAmount > 0);
         vm.assume(vaultAmount <= type(uint96).max);
@@ -378,12 +316,7 @@ contract SurplusTrackerTest is Test {
         vm.stopPrank();
 
         // Calculate surplus
-        uint256 surplus = tracker.getSurplus(
-            address(vault),
-            address(token),
-            client,
-            internalAmount
-        );
+        uint256 surplus = tracker.getSurplus(address(vault), address(token), client, internalAmount);
 
         // Verify logic
         if (vaultAmount > internalAmount) {

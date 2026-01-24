@@ -29,10 +29,7 @@ contract SurplusWithdrawerTest is Test {
     address public nonOwner;
 
     event ConfigurationUpdated(
-        address indexed token,
-        address indexed vault,
-        address indexed yieldStrategy,
-        address client
+        address indexed token, address indexed vault, address indexed yieldStrategy, address client
     );
 
     event SurplusWithdrawn(
@@ -63,11 +60,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Deploy the real AutoDolaYieldStrategy
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(token),
-            address(tokeToken),
-            address(autoDolaVault),
-            address(mainRewarder)
+            owner, address(token), address(tokeToken), address(autoDolaVault), address(mainRewarder)
         );
 
         // Deploy withdrawer
@@ -191,11 +184,7 @@ contract SurplusWithdrawerTest is Test {
         MockMainRewarder newRewarder = new MockMainRewarder(address(newTokeToken));
         MockAutoDOLA newAutoDolaVault = new MockAutoDOLA(address(newToken), address(newRewarder));
         AutoDolaYieldStrategy newVault = new AutoDolaYieldStrategy(
-            owner,
-            address(newToken),
-            address(newTokeToken),
-            address(newAutoDolaVault),
-            address(newRewarder)
+            owner, address(newToken), address(newTokeToken), address(newAutoDolaVault), address(newRewarder)
         );
         address newClient = address(0x99);
 
@@ -401,14 +390,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Expect event
         vm.expectEmit(true, true, true, true);
-        emit SurplusWithdrawn(
-            address(vault),
-            address(token),
-            client,
-            50,
-            100e18,
-            recipient
-        );
+        emit SurplusWithdrawn(address(vault), address(token), client, 50, 100e18, recipient);
 
         // Withdraw 50%
         withdrawer.withdrawSurplusPercent(50, recipient);

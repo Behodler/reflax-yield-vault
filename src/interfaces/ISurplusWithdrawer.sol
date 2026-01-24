@@ -15,10 +15,7 @@ interface ISurplusWithdrawer {
      * @param client The client address configured for surplus withdrawal
      */
     event ConfigurationUpdated(
-        address indexed token,
-        address indexed vault,
-        address indexed yieldStrategy,
-        address client
+        address indexed token, address indexed vault, address indexed yieldStrategy, address client
     );
 
     /**
@@ -65,8 +62,5 @@ interface ISurplusWithdrawer {
      *      Reverts if contract is not configured
      *      Only callable by owner (recommend multisig)
      */
-    function withdrawSurplusPercent(
-        uint256 percentage,
-        address recipient
-    ) external returns (uint256);
+    function withdrawSurplusPercent(uint256 percentage, address recipient) external returns (uint256);
 }

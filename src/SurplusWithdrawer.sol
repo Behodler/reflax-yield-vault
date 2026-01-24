@@ -14,7 +14,6 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  *      Must be configured with token, vault, and yieldStrategy addresses before withdrawal can occur
  */
 contract SurplusWithdrawer is ISurplusWithdrawer, Ownable {
-
     // ============ STATE VARIABLES ============
 
     /// @notice The SurplusTracker contract used to calculate surplus
@@ -88,10 +87,12 @@ contract SurplusWithdrawer is ISurplusWithdrawer, Ownable {
      *      Withdraws (surplus * percentage) / 100 using pre-configured YieldStrategy.withdrawFrom()
      *      Reverts if contract is not configured
      */
-    function withdrawSurplusPercent(
-        uint256 percentage,
-        address recipient
-    ) external override onlyOwner returns (uint256) {
+    function withdrawSurplusPercent(uint256 percentage, address recipient)
+        external
+        override
+        onlyOwner
+        returns (uint256)
+    {
         // Validate configuration
         require(token != address(0), "SurplusWithdrawer: not configured - token is zero address");
         require(vault != address(0), "SurplusWithdrawer: not configured - vault is zero address");

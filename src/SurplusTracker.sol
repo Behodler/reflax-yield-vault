@@ -33,12 +33,12 @@ contract SurplusTracker is ISurplusTracker {
      *      If vaultBalance > clientInternalBalance, the difference is the surplus (harvestable yield)
      *      If vaultBalance <= clientInternalBalance, there is no surplus (returns 0)
      */
-    function getSurplus(
-        address vault,
-        address token,
-        address client,
-        uint256 clientInternalBalance
-    ) external view override returns (uint256) {
+    function getSurplus(address vault, address token, address client, uint256 clientInternalBalance)
+        external
+        view
+        override
+        returns (uint256)
+    {
         require(vault != address(0), "SurplusTracker: vault cannot be zero address");
         require(token != address(0), "SurplusTracker: token cannot be zero address");
         require(client != address(0), "SurplusTracker: client cannot be zero address");

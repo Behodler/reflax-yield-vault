@@ -21,9 +21,5 @@ interface IAutoDOLA is IERC4626 {
      * @return symbol The vault symbol
      * @return name The vault name
      */
-    function getVaultInfo() external view returns (
-        address asset,
-        string memory symbol,
-        string memory name
-    );
+    function getVaultInfo() external view returns (address asset, string memory symbol, string memory name);
 }

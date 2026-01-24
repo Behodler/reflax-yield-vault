@@ -17,10 +17,8 @@ interface ISurplusTracker {
      * @dev Surplus represents yield that has accrued in the vault but is not tracked in client's internal accounting
      *      For example: Behodler's virtualInputTokens (internal) vs vault's balanceOf (actual with yield)
      */
-    function getSurplus(
-        address vault,
-        address token,
-        address client,
-        uint256 clientInternalBalance
-    ) external view returns (uint256);
+    function getSurplus(address vault, address token, address client, uint256 clientInternalBalance)
+        external
+        view
+        returns (uint256);
 }

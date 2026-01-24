@@ -25,7 +25,7 @@ contract AutoDolaYieldStrategyUnitTest is Test {
     address user3 = address(0x2468);
 
     uint256 constant INITIAL_DOLA_SUPPLY = 10000000e18; // 10M DOLA
-    uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18;  // 1M TOKE
+    uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18; // 1M TOKE
 
     function setUp() public {
         // Deploy mock tokens
@@ -41,11 +41,7 @@ contract AutoDolaYieldStrategyUnitTest is Test {
         // Deploy the vault
         vm.prank(owner);
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(dolaToken),
-            address(tokeToken),
-            address(autoDolaVault),
-            address(mainRewarder)
+            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
         );
 
         // Mint tokens
@@ -351,7 +347,7 @@ contract AutoDolaYieldStrategyUnitTest is Test {
     function testMultipleUsersWithDifferentPrincipals() public {
         // Scenario: Multiple users with different deposit amounts, varying yield
         uint256[] memory deposits = new uint256[](3);
-        deposits[0] = 500e18;  // user1
+        deposits[0] = 500e18; // user1
         deposits[1] = 1500e18; // user2
         deposits[2] = 3000e18; // user3
 
@@ -361,7 +357,7 @@ contract AutoDolaYieldStrategyUnitTest is Test {
         users[2] = user3;
 
         // Deposits
-        for (uint i = 0; i < users.length; i++) {
+        for (uint256 i = 0; i < users.length; i++) {
             vm.prank(client);
             dolaToken.approve(address(vault), deposits[i]);
             vm.prank(client);
@@ -369,7 +365,7 @@ contract AutoDolaYieldStrategyUnitTest is Test {
         }
 
         // Verify principals
-        for (uint i = 0; i < users.length; i++) {
+        for (uint256 i = 0; i < users.length; i++) {
             assertEq(vault.principalOf(address(dolaToken), users[i]), deposits[i]);
         }
 
@@ -377,7 +373,7 @@ contract AutoDolaYieldStrategyUnitTest is Test {
         autoDolaVault.simulateYield(2000e18);
 
         // Verify totalBalanceOf proportions
-        for (uint i = 0; i < users.length; i++) {
+        for (uint256 i = 0; i < users.length; i++) {
             uint256 expectedTotal = (deposits[i] * 7000e18) / 5000e18;
             assertApproxEqAbs(vault.totalBalanceOf(address(dolaToken), users[i]), expectedTotal, 1);
         }
@@ -476,12 +472,20 @@ contract AutoDolaYieldStrategyUnitTest is Test {
         vault.withdrawFrom(address(dolaToken), client, withdrawAmount, authorizedWithdrawer);
 
         // CRITICAL ASSERTIONS: Principal must NEVER change
-        assertEq(vault.principalOf(address(dolaToken), client), principalBefore, "Principal changed during surplus withdrawal!");
-        assertEq(vault.principalOf(address(dolaToken), client), depositAmount, "Principal does not match original deposit!");
+        assertEq(
+            vault.principalOf(address(dolaToken), client),
+            principalBefore,
+            "Principal changed during surplus withdrawal!"
+        );
+        assertEq(
+            vault.principalOf(address(dolaToken), client), depositAmount, "Principal does not match original deposit!"
+        );
 
         // Total balance should decrease by withdrawal amount
         uint256 totalBalanceAfter = vault.totalBalanceOf(address(dolaToken), client);
-        assertApproxEqAbs(totalBalanceAfter, totalBalanceBefore - withdrawAmount, 1, "Total balance did not decrease correctly");
+        assertApproxEqAbs(
+            totalBalanceAfter, totalBalanceBefore - withdrawAmount, 1, "Total balance did not decrease correctly"
+        );
 
         // Remaining surplus should be approximately half
         uint256 surplusAfter = totalBalanceAfter - principalBefore;
@@ -549,19 +553,24 @@ contract AutoDolaYieldStrategyUnitTest is Test {
         uint256 principalBefore = vault.principalOf(address(dolaToken), client);
 
         // Perform 5 surplus withdrawals
-        for (uint i = 0; i < 5; i++) {
+        for (uint256 i = 0; i < 5; i++) {
             uint256 totalBalance = vault.totalBalanceOf(address(dolaToken), client);
             uint256 principal = vault.principalOf(address(dolaToken), client);
             uint256 surplus = totalBalance - principal;
 
-            if (surplus > 10e18) { // Only withdraw if surplus is significant
+            if (surplus > 10e18) {
+                // Only withdraw if surplus is significant
                 uint256 withdrawAmount = surplus / 4; // Withdraw 25% of current surplus
 
                 vm.prank(authorizedWithdrawer);
                 vault.withdrawFrom(address(dolaToken), client, withdrawAmount, authorizedWithdrawer);
 
                 // CRITICAL: Principal must NEVER change across multiple withdrawals
-                assertEq(vault.principalOf(address(dolaToken), client), principalBefore, "Principal changed during multiple surplus withdrawals!");
+                assertEq(
+                    vault.principalOf(address(dolaToken), client),
+                    principalBefore,
+                    "Principal changed during multiple surplus withdrawals!"
+                );
             }
         }
 
@@ -604,7 +613,9 @@ contract AutoDolaYieldStrategyUnitTest is Test {
 
         // After withdrawing all surplus, totalBalanceOf should approximately equal principal
         uint256 totalBalanceAfter = vault.totalBalanceOf(address(dolaToken), client);
-        assertApproxEqAbs(totalBalanceAfter, principal, 1, "Total balance should equal principal after withdrawing all surplus");
+        assertApproxEqAbs(
+            totalBalanceAfter, principal, 1, "Total balance should equal principal after withdrawing all surplus"
+        );
 
         // Surplus should be zero (or near zero due to rounding)
         uint256 surplusAfter = totalBalanceAfter > principal ? totalBalanceAfter - principal : 0;

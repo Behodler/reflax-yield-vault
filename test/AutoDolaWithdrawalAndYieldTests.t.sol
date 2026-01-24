@@ -42,19 +42,11 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
     // Events from AutoDolaYieldStrategy
     event DolaDeposited(
-        address indexed token,
-        address indexed client,
-        address indexed recipient,
-        uint256 amount,
-        uint256 sharesReceived
+        address indexed token, address indexed client, address indexed recipient, uint256 amount, uint256 sharesReceived
     );
 
     event DolaWithdrawn(
-        address indexed token,
-        address indexed client,
-        address indexed recipient,
-        uint256 amount,
-        uint256 sharesBurned
+        address indexed token, address indexed client, address indexed recipient, uint256 amount, uint256 sharesBurned
     );
 
     function setUp() public {
@@ -70,11 +62,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         // Deploy AutoDolaYieldStrategy
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(dolaToken),
-            address(tokeToken),
-            address(autoDolaVault),
-            address(mainRewarder)
+            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
         );
 
         // Authorize clients
@@ -231,14 +219,12 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
     // CATEGORY 2: YIELD EXCLUSION TESTS
     // ============================================
 
-
     /**
      * @notice Test: Yield remains in vault after user withdrawal
      * @dev Withdrawn shares' yield portion should be re-staked, not given to user
      */
     // REMOVED: testYieldExclusion_YieldRemainsInVault
     // No longer relevant - yield is proportionally distributed, not retained
-
 
     /**
      * @notice Test: Re-depositing after partial withdrawal doesn't unlock previous yield
@@ -266,10 +252,12 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         // User balance should be sum of remaining + re-deposit, NOT including yield
         uint256 expectedBalance = balanceAfterWithdraw + reDepositAmount;
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), expectedBalance,
-            "Balance should be principal only, no yield access from re-deposit");
+        assertEq(
+            vault.balanceOf(address(dolaToken), recipient1),
+            expectedBalance,
+            "Balance should be principal only, no yield access from re-deposit"
+        );
     }
-
 
     // ============================================
     // CATEGORY 3: LEFTOVERSHARES CALCULATION ACCURACY
@@ -301,8 +289,11 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         // CRITICAL ASSERTION: Vault balance should match staked shares
         // This may fail due to rounding in leftoverShares calculation (line 228)
-        assertEq(vaultSharesAfter, totalStakedShares,
-            "AutoDOLA vault balance must match MainRewarder staked balance - leftoverShares calculation error");
+        assertEq(
+            vaultSharesAfter,
+            totalStakedShares,
+            "AutoDOLA vault balance must match MainRewarder staked balance - leftoverShares calculation error"
+        );
     }
 
     /**
@@ -334,8 +325,11 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         // CRITICAL: These should be exactly equal
         // Any discrepancy indicates leftoverShares calculation error
-        assertEq(totalSharesInVaultAfter, totalSharesInMainRewarderAfter,
-            "Vault share balance must exactly match MainRewarder staked balance");
+        assertEq(
+            totalSharesInVaultAfter,
+            totalSharesInMainRewarderAfter,
+            "Vault share balance must exactly match MainRewarder staked balance"
+        );
     }
 
     /**
@@ -363,8 +357,11 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 stakedSharesAfter = mainRewarder.balanceOf(address(vault));
 
         // Even with rounding, vault and staked shares must be exactly equal
-        assertEq(vaultSharesAfter, stakedSharesAfter,
-            "Rounding errors in leftoverShares calculation cause vault/staked mismatch");
+        assertEq(
+            vaultSharesAfter,
+            stakedSharesAfter,
+            "Rounding errors in leftoverShares calculation cause vault/staked mismatch"
+        );
     }
 
     // REMOVED: testLeftoverShares_YieldExclusionAccuracy
@@ -449,7 +446,6 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         assertEq(vaultShares, stakedShares, "Dust withdrawal should not break share accounting");
     }
 
-
     /**
      * @notice Test: Fractional share calculations maintain yield exclusion
      * @dev Complex fractional calculations should preserve yield exclusion
@@ -519,10 +515,12 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 received = _withdraw(client1, withdrawAmount, recipient1);
 
         assertEq(received, withdrawAmount, "Should receive exact amount for large withdrawal");
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), largeAmount - withdrawAmount,
-            "Large amount accounting should be accurate");
+        assertEq(
+            vault.balanceOf(address(dolaToken), recipient1),
+            largeAmount - withdrawAmount,
+            "Large amount accounting should be accurate"
+        );
     }
-
 
     /**
      * @notice Test: High precision amounts maintain accurate accounting
@@ -568,8 +566,11 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _withdraw(client1, 150000 ether, recipient1);
         _withdraw(client1, 200000 ether, recipient1);
 
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 250000 ether,
-            "Balance should be accurate after multiple large operations");
+        assertEq(
+            vault.balanceOf(address(dolaToken), recipient1),
+            250000 ether,
+            "Balance should be accurate after multiple large operations"
+        );
 
         // Shares should still match
         uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
@@ -595,8 +596,9 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 received = _withdraw(client1, halfAmount, recipient1);
 
         assertEq(received, halfAmount, "Should receive half amount");
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), halfAmount,
-            "Remaining balance should be exactly half");
+        assertEq(
+            vault.balanceOf(address(dolaToken), recipient1), halfAmount, "Remaining balance should be exactly half"
+        );
     }
 
     /**
@@ -614,8 +616,11 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         for (uint256 i = 0; i < 5; i++) {
             _withdraw(client1, tenPercent, recipient1);
             uint256 expectedRemaining = depositAmount - (tenPercent * (i + 1));
-            assertEq(vault.balanceOf(address(dolaToken), recipient1), expectedRemaining,
-                "Balance should decrease by 10% each time");
+            assertEq(
+                vault.balanceOf(address(dolaToken), recipient1),
+                expectedRemaining,
+                "Balance should decrease by 10% each time"
+            );
         }
 
         // Final balance should be 50%
@@ -637,8 +642,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         // Yield accrues
         _simulateYield(500 ether);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 6000 ether,
-            "Yield should not change user balance");
+        assertEq(vault.balanceOf(address(dolaToken), recipient1), 6000 ether, "Yield should not change user balance");
 
         // Second partial withdrawal
         _withdraw(client1, 3000 ether, recipient1);
@@ -652,12 +656,9 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         assertEq(vault.balanceOf(address(dolaToken), recipient1), 0, "Final balance should be zero");
     }
 
-
     // ============================================
     // CATEGORY 7: FULL WITHDRAWAL TESTS
     // ============================================
-
-
 
     // REMOVED: testFullWithdrawal_LeftoverSharesCalculation
     // No longer relevant - proportional distribution eliminates leftover shares concept
@@ -794,7 +795,6 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         assertEq(vaultShares, stakedShares, "Multi-user cycles should not break share accounting");
     }
 
-
     /**
      * @notice Test: Balance tracking remains accurate across many cycles
      * @dev Extensive cycling should not drift accounting accuracy
@@ -821,8 +821,11 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
             expectedBalance += ((i + 1) * 1000 ether) / 2;
         }
 
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), expectedBalance,
-            "Balance should be accurate after many cycles");
+        assertEq(
+            vault.balanceOf(address(dolaToken), recipient1),
+            expectedBalance,
+            "Balance should be accurate after many cycles"
+        );
 
         // Shares should be consistent
         uint256 vaultShares = autoDolaVault.balanceOf(address(vault));

@@ -29,11 +29,7 @@ contract VaultWithdrawerTest is Test {
 
     event WithdrawerAuthorizationSet(address indexed withdrawer, bool authorized);
     event WithdrawnFrom(
-        address indexed token,
-        address indexed client,
-        address indexed withdrawer,
-        uint256 amount,
-        address recipient
+        address indexed token, address indexed client, address indexed withdrawer, uint256 amount, address recipient
     );
 
     function setUp() public {
@@ -53,11 +49,7 @@ contract VaultWithdrawerTest is Test {
 
         // Deploy the real AutoDolaYieldStrategy
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(depositToken),
-            address(tokeToken),
-            address(autoDolaVault),
-            address(mainRewarder)
+            owner, address(depositToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
         );
 
         // Authorize client for vault operations
@@ -159,7 +151,12 @@ contract VaultWithdrawerTest is Test {
         // Verify balances - principal should stay at 1000e18, total should be 1000e18 (surplus withdrawn)
         assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
         // Allow for 1 wei rounding error
-        assertApproxEqAbs(depositToken.balanceOf(recipient), recipientBalanceBefore + withdrawAmount, 1, "Recipient balance within 1 wei");
+        assertApproxEqAbs(
+            depositToken.balanceOf(recipient),
+            recipientBalanceBefore + withdrawAmount,
+            1,
+            "Recipient balance within 1 wei"
+        );
     }
 
     function testWithdrawFromMultipleClients() public {

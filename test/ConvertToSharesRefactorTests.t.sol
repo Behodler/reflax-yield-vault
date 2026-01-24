@@ -34,23 +34,15 @@ contract ConvertToSharesRefactorTests is Test {
     address user = address(0xDEF0);
 
     uint256 constant INITIAL_DOLA_SUPPLY = 100000000e18; // 100M DOLA
-    uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18;   // 1M TOKE
+    uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18; // 1M TOKE
 
     // Events
     event DolaDeposited(
-        address indexed token,
-        address indexed client,
-        address indexed recipient,
-        uint256 amount,
-        uint256 sharesReceived
+        address indexed token, address indexed client, address indexed recipient, uint256 amount, uint256 sharesReceived
     );
 
     event DolaWithdrawn(
-        address indexed token,
-        address indexed client,
-        address indexed recipient,
-        uint256 amount,
-        uint256 sharesBurned
+        address indexed token, address indexed client, address indexed recipient, uint256 amount, uint256 sharesBurned
     );
 
     function setUp() public {
@@ -67,11 +59,7 @@ contract ConvertToSharesRefactorTests is Test {
         // Deploy AutoDolaYieldStrategy
         vm.prank(owner);
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(dolaToken),
-            address(tokeToken),
-            address(autoDolaVault),
-            address(mainRewarder)
+            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
         );
 
         // Mint tokens
@@ -199,7 +187,9 @@ contract ConvertToSharesRefactorTests is Test {
 
         // Assert: User receives ≤ 1000 DOLA (principal only)
         assertLe(dolaReceived, depositAmount, "User should receive at most principal amount");
-        assertGe(dolaReceived, depositAmount - 1e18, "User should receive approximately principal (within 1 DOLA tolerance)");
+        assertGe(
+            dolaReceived, depositAmount - 1e18, "User should receive approximately principal (within 1 DOLA tolerance)"
+        );
 
         // Assert: Vault retains ~100 DOLA worth of shares (the yield)
         uint256 remainingSharesValue = autoDolaVault.previewRedeem(mainRewarder.balanceOf(address(vault)));
@@ -362,11 +352,11 @@ contract ConvertToSharesRefactorTests is Test {
         // Calculate shares using both methods
         uint256 withdrawAmount = 500e18;
         uint256 methodA_shares = (totalShares * withdrawAmount) / totalDeposited; // Manual proportional
-        uint256 methodB_shares = autoDolaVault.convertToShares(withdrawAmount);    // ERC4626 standard
+        uint256 methodB_shares = autoDolaVault.convertToShares(withdrawAmount); // ERC4626 standard
 
         // Assert: Methods should be equivalent when no yield
-        uint256 difference = methodA_shares > methodB_shares ?
-            methodA_shares - methodB_shares : methodB_shares - methodA_shares;
+        uint256 difference =
+            methodA_shares > methodB_shares ? methodA_shares - methodB_shares : methodB_shares - methodA_shares;
         assertLe(difference, 1e18, "Methods should be equivalent within rounding tolerance");
 
         // Now test with yield present

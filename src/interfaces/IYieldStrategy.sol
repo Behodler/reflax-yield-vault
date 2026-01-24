@@ -89,10 +89,5 @@ interface IYieldStrategy {
      * @param recipient The address that will receive the withdrawn tokens
      * @dev Only authorized withdrawers can call this function. This is used to extract surplus yield.
      */
-    function withdrawFrom(
-        address token,
-        address client,
-        uint256 amount,
-        address recipient
-    ) external;
+    function withdrawFrom(address token, address client, uint256 amount, address recipient) external;
 }

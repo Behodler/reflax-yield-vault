@@ -29,19 +29,10 @@ contract TotalWithdrawalTest is Test {
     uint256 public constant TOTAL_DURATION = WAITING_PERIOD + EXECUTION_WINDOW;
 
     event WithdrawalInitiated(
-        address indexed token,
-        address indexed client,
-        uint256 balance,
-        uint256 initiatedAt,
-        uint256 executableAt
+        address indexed token, address indexed client, uint256 balance, uint256 initiatedAt, uint256 executableAt
     );
 
-    event WithdrawalExecuted(
-        address indexed token,
-        address indexed client,
-        uint256 amount,
-        uint256 executedAt
-    );
+    event WithdrawalExecuted(address indexed token, address indexed client, uint256 amount, uint256 executedAt);
 
     function setUp() public {
         // Deploy mock tokens
@@ -54,11 +45,7 @@ contract TotalWithdrawalTest is Test {
 
         // Deploy the real AutoDolaYieldStrategy
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(depositToken),
-            address(tokeToken),
-            address(autoDolaVault),
-            address(mainRewarder)
+            owner, address(depositToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
         );
 
         // Setup initial token balance and authorization
@@ -83,7 +70,7 @@ contract TotalWithdrawalTest is Test {
 
     function testOnlyOwnerCanInitiateWithdrawal() public {
         vm.prank(nonOwner);
-        vm.expectRevert();  // OwnableUnauthorizedAccount error in newer OpenZeppelin
+        vm.expectRevert(); // OwnableUnauthorizedAccount error in newer OpenZeppelin
         vault.totalWithdrawal(address(depositToken), client);
     }
 
@@ -116,17 +103,14 @@ contract TotalWithdrawalTest is Test {
         // Expect the WithdrawalInitiated event
         vm.expectEmit(true, true, false, true);
         emit WithdrawalInitiated(
-            address(depositToken),
-            client,
-            DEPOSIT_AMOUNT,
-            block.timestamp,
-            block.timestamp + WAITING_PERIOD
+            address(depositToken), client, DEPOSIT_AMOUNT, block.timestamp, block.timestamp + WAITING_PERIOD
         );
 
         vault.totalWithdrawal(address(depositToken), client);
 
         // Check withdrawal state
-        (uint256 initiatedAt, AYieldStrategy.WithdrawalStatus status, uint256 balance) = vault.withdrawalStates(address(depositToken), client);
+        (uint256 initiatedAt, AYieldStrategy.WithdrawalStatus status, uint256 balance) =
+            vault.withdrawalStates(address(depositToken), client);
         assertEq(initiatedAt, block.timestamp);
         assertTrue(status == AYieldStrategy.WithdrawalStatus.Initiated);
         assertEq(balance, DEPOSIT_AMOUNT);
@@ -167,12 +151,7 @@ contract TotalWithdrawalTest is Test {
         // Phase 2: Execute withdrawal
         vm.prank(owner);
         vm.expectEmit(true, true, false, true);
-        emit WithdrawalExecuted(
-            address(depositToken),
-            client,
-            DEPOSIT_AMOUNT,
-            block.timestamp
-        );
+        emit WithdrawalExecuted(address(depositToken), client, DEPOSIT_AMOUNT, block.timestamp);
 
         vault.totalWithdrawal(address(depositToken), client);
 
@@ -181,7 +160,8 @@ contract TotalWithdrawalTest is Test {
         assertEq(depositToken.balanceOf(owner), ownerBalanceBefore + DEPOSIT_AMOUNT);
 
         // Verify state was reset
-        (uint256 initiatedAt, AYieldStrategy.WithdrawalStatus status, uint256 balance) = vault.withdrawalStates(address(depositToken), client);
+        (uint256 initiatedAt, AYieldStrategy.WithdrawalStatus status, uint256 balance) =
+            vault.withdrawalStates(address(depositToken), client);
         assertEq(initiatedAt, 0);
         assertTrue(status == AYieldStrategy.WithdrawalStatus.None);
         assertEq(balance, 0);
@@ -201,17 +181,14 @@ contract TotalWithdrawalTest is Test {
         vm.prank(owner);
         vm.expectEmit(true, true, false, true);
         emit WithdrawalInitiated(
-            address(depositToken),
-            client,
-            DEPOSIT_AMOUNT,
-            block.timestamp,
-            block.timestamp + WAITING_PERIOD
+            address(depositToken), client, DEPOSIT_AMOUNT, block.timestamp, block.timestamp + WAITING_PERIOD
         );
 
         vault.totalWithdrawal(address(depositToken), client);
 
         // Verify new withdrawal state
-        (uint256 initiatedAt, AYieldStrategy.WithdrawalStatus status, uint256 balance) = vault.withdrawalStates(address(depositToken), client);
+        (uint256 initiatedAt, AYieldStrategy.WithdrawalStatus status, uint256 balance) =
+            vault.withdrawalStates(address(depositToken), client);
         assertEq(initiatedAt, block.timestamp);
         assertTrue(status == AYieldStrategy.WithdrawalStatus.Initiated);
         assertEq(balance, DEPOSIT_AMOUNT);
@@ -374,7 +351,8 @@ contract TotalWithdrawalTest is Test {
         vm.prank(owner);
         vault.totalWithdrawal(address(depositToken), client);
         {
-            (uint256 initiatedAt1, AYieldStrategy.WithdrawalStatus status1, uint256 balance1) = vault.withdrawalStates(address(depositToken), client);
+            (uint256 initiatedAt1, AYieldStrategy.WithdrawalStatus status1, uint256 balance1) =
+                vault.withdrawalStates(address(depositToken), client);
             assertEq(initiatedAt1, startTime);
             assertTrue(status1 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(balance1, DEPOSIT_AMOUNT);
@@ -385,7 +363,8 @@ contract TotalWithdrawalTest is Test {
         vm.prank(owner);
         vault.totalWithdrawal(address(depositToken), client2);
         {
-            (uint256 initiatedAt2, AYieldStrategy.WithdrawalStatus status2, uint256 balance2) = vault.withdrawalStates(address(depositToken), client2);
+            (uint256 initiatedAt2, AYieldStrategy.WithdrawalStatus status2, uint256 balance2) =
+                vault.withdrawalStates(address(depositToken), client2);
             assertEq(initiatedAt2, startTime + 1 hours);
             assertTrue(status2 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(balance2, DEPOSIT_AMOUNT);
@@ -396,7 +375,8 @@ contract TotalWithdrawalTest is Test {
         vm.prank(owner);
         vault.totalWithdrawal(address(depositToken), client3);
         {
-            (uint256 initiatedAt3, AYieldStrategy.WithdrawalStatus status3, uint256 balance3) = vault.withdrawalStates(address(depositToken), client3);
+            (uint256 initiatedAt3, AYieldStrategy.WithdrawalStatus status3, uint256 balance3) =
+                vault.withdrawalStates(address(depositToken), client3);
             assertEq(initiatedAt3, startTime + 2 hours);
             assertTrue(status3 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(balance3, DEPOSIT_AMOUNT);
@@ -494,9 +474,9 @@ contract TotalWithdrawalTest is Test {
 
         // Verify cached balances
         {
-            (, , uint256 cachedBalance1) = vault.withdrawalStates(address(depositToken), client);
-            (, , uint256 cachedBalance2) = vault.withdrawalStates(address(depositToken), client2);
-            (, , uint256 cachedBalance3) = vault.withdrawalStates(address(depositToken), client3);
+            (,, uint256 cachedBalance1) = vault.withdrawalStates(address(depositToken), client);
+            (,, uint256 cachedBalance2) = vault.withdrawalStates(address(depositToken), client2);
+            (,, uint256 cachedBalance3) = vault.withdrawalStates(address(depositToken), client3);
             assertEq(cachedBalance1, DEPOSIT_AMOUNT);
             assertEq(cachedBalance2, DEPOSIT_AMOUNT);
             assertEq(cachedBalance3, DEPOSIT_AMOUNT);
@@ -508,17 +488,20 @@ contract TotalWithdrawalTest is Test {
 
         // Verify withdrawal states remain valid after emergency withdraw
         {
-            (, AYieldStrategy.WithdrawalStatus afterStatus1, uint256 afterBalance1) = vault.withdrawalStates(address(depositToken), client);
+            (, AYieldStrategy.WithdrawalStatus afterStatus1, uint256 afterBalance1) =
+                vault.withdrawalStates(address(depositToken), client);
             assertTrue(afterStatus1 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(afterBalance1, DEPOSIT_AMOUNT);
         }
         {
-            (, AYieldStrategy.WithdrawalStatus afterStatus2, uint256 afterBalance2) = vault.withdrawalStates(address(depositToken), client2);
+            (, AYieldStrategy.WithdrawalStatus afterStatus2, uint256 afterBalance2) =
+                vault.withdrawalStates(address(depositToken), client2);
             assertTrue(afterStatus2 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(afterBalance2, DEPOSIT_AMOUNT);
         }
         {
-            (, AYieldStrategy.WithdrawalStatus afterStatus3, uint256 afterBalance3) = vault.withdrawalStates(address(depositToken), client3);
+            (, AYieldStrategy.WithdrawalStatus afterStatus3, uint256 afterBalance3) =
+                vault.withdrawalStates(address(depositToken), client3);
             assertTrue(afterStatus3 == AYieldStrategy.WithdrawalStatus.Initiated);
             assertEq(afterBalance3, DEPOSIT_AMOUNT);
         }

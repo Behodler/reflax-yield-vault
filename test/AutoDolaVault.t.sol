@@ -21,7 +21,7 @@ contract AutoDolaVaultTest is Test {
     address user2 = address(0x1357);
 
     uint256 constant INITIAL_DOLA_SUPPLY = 10000000e18; // 10M DOLA
-    uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18;  // 1M TOKE
+    uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18; // 1M TOKE
 
     function setUp() public {
         // Deploy mock tokens
@@ -37,11 +37,7 @@ contract AutoDolaVaultTest is Test {
         // Deploy the actual vault
         vm.prank(owner);
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(dolaToken),
-            address(tokeToken),
-            address(autoDolaVault),
-            address(mainRewarder)
+            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
         );
 
         // Mint tokens to test addresses
@@ -249,7 +245,12 @@ contract AutoDolaVaultTest is Test {
 
         // Verify withdrawal with precise assertion
         uint256 finalOwnerDola = dolaToken.balanceOf(owner);
-        assertApproxEqAbs(finalOwnerDola, initialOwnerDola + emergencyAmount, 1, "Emergency withdrawal should transfer requested amount within 1 wei");
+        assertApproxEqAbs(
+            finalOwnerDola,
+            initialOwnerDola + emergencyAmount,
+            1,
+            "Emergency withdrawal should transfer requested amount within 1 wei"
+        );
     }
 
     // DELETED: testEmergencyWithdrawPartial
@@ -291,7 +292,9 @@ contract AutoDolaVaultTest is Test {
 
         // Should succeed and withdraw what's possible
         uint256 ownerBalanceAfter = dolaToken.balanceOf(owner);
-        assertGt(ownerBalanceAfter, ownerBalanceBefore, "Should withdraw some amount even with insufficient staked shares");
+        assertGt(
+            ownerBalanceAfter, ownerBalanceBefore, "Should withdraw some amount even with insufficient staked shares"
+        );
     }
 
     /**
@@ -507,8 +510,8 @@ contract AutoDolaVaultTest is Test {
         // Allow for small rounding errors (within 0.1%)
         uint256 tolerance = expectedSharesForUser1 / 1000;
         assertTrue(
-            sharesWithdrawn >= expectedSharesForUser1 - tolerance &&
-            sharesWithdrawn <= expectedSharesForUser1 + tolerance,
+            sharesWithdrawn >= expectedSharesForUser1 - tolerance
+                && sharesWithdrawn <= expectedSharesForUser1 + tolerance,
             "Share calculation should be accurate"
         );
 
@@ -565,8 +568,7 @@ contract AutoDolaVaultTest is Test {
         uint256 tolerance = expectedUnstaked / 100; // 1% tolerance
 
         assertTrue(
-            sharesUnstaked >= expectedUnstaked - tolerance &&
-            sharesUnstaked <= expectedUnstaked + tolerance,
+            sharesUnstaked >= expectedUnstaked - tolerance && sharesUnstaked <= expectedUnstaked + tolerance,
             "Should unstake correct proportion of shares"
         );
 
@@ -842,7 +844,9 @@ contract AutoDolaVaultTest is Test {
 
         // Verify client1 balance is tracked correctly
         uint256 clientBalance = vault.balanceOf(address(dolaToken), client1);
-        assertApproxEqAbs(clientBalance, oneWei, 1, "Client balance should be approximately 1 wei within 1 wei tolerance");
+        assertApproxEqAbs(
+            clientBalance, oneWei, 1, "Client balance should be approximately 1 wei within 1 wei tolerance"
+        );
 
         // Withdraw the 1 wei - client1 withdraws their own balance to themselves
         uint256 recipientBalanceBefore = dolaToken.balanceOf(client1);
@@ -889,7 +893,12 @@ contract AutoDolaVaultTest is Test {
 
         // Allow for accumulated rounding errors (1 wei per deposit max = 100 wei tolerance)
         uint256 tolerance = numDeposits; // 1 wei per operation
-        assertApproxEqAbs(clientBalance, totalExpected, tolerance, "Total balance should match sum of deposits within rounding tolerance");
+        assertApproxEqAbs(
+            clientBalance,
+            totalExpected,
+            tolerance,
+            "Total balance should match sum of deposits within rounding tolerance"
+        );
 
         // Verify total deposited is tracked accurately
         uint256 totalDeposited = vault.getTotalDeposited(address(dolaToken));
@@ -906,7 +915,9 @@ contract AutoDolaVaultTest is Test {
         uint256 actualWithdrawn = recipientBalanceAfter - recipientBalanceBefore;
 
         // Verify withdrawal amount is accurate
-        assertApproxEqAbs(actualWithdrawn, withdrawAmount, tolerance, "Withdrawal should be accurate after dust deposits");
+        assertApproxEqAbs(
+            actualWithdrawn, withdrawAmount, tolerance, "Withdrawal should be accurate after dust deposits"
+        );
     }
 
     /**
@@ -946,7 +957,12 @@ contract AutoDolaVaultTest is Test {
 
         // Verify that dust doesn't accumulate in the vault
         // The sum of withdrawn + remaining should approximately equal original deposit
-        assertApproxEqAbs(actualWithdrawn + remainingBalance, depositAmount, 2, "Sum of withdrawn and remaining should equal deposit within 2 wei tolerance");
+        assertApproxEqAbs(
+            actualWithdrawn + remainingBalance,
+            depositAmount,
+            2,
+            "Sum of withdrawn and remaining should equal deposit within 2 wei tolerance"
+        );
 
         // Test second withdrawal to verify dust handling continues to work
         uint256 secondWithdrawAmount = remainingBalance / 2;
@@ -959,13 +975,20 @@ contract AutoDolaVaultTest is Test {
         uint256 secondActualWithdrawn = recipientBalanceAfter - recipientBalanceBefore;
 
         // Verify second withdrawal also accurate
-        assertApproxEqAbs(secondActualWithdrawn, secondWithdrawAmount, 1, "Second withdrawal should be accurate within 1 wei");
+        assertApproxEqAbs(
+            secondActualWithdrawn, secondWithdrawAmount, 1, "Second withdrawal should be accurate within 1 wei"
+        );
 
         // Final balance should still be reasonable
         uint256 finalBalance = vault.balanceOf(address(dolaToken), client1);
         uint256 totalWithdrawn = actualWithdrawn + secondActualWithdrawn;
 
-        assertApproxEqAbs(totalWithdrawn + finalBalance, depositAmount, 3, "Total accounting should remain accurate after multiple dust-creating withdrawals");
+        assertApproxEqAbs(
+            totalWithdrawn + finalBalance,
+            depositAmount,
+            3,
+            "Total accounting should remain accurate after multiple dust-creating withdrawals"
+        );
     }
 
     // DELETED: testExtremeShareRatioScenarios
@@ -1022,9 +1045,17 @@ contract AutoDolaVaultTest is Test {
         uint256 totalDepositedAfterClaim = vault.getTotalDeposited(address(dolaToken));
         uint256 totalSharesAfterClaim = vault.getTotalShares();
 
-        assertEq(userBalanceAfterClaim, userBalanceBeforeClaim, "User balance should not change when rewards are claimed");
-        assertEq(totalDepositedAfterClaim, totalDepositedBeforeClaim, "Total deposited should not change when rewards are claimed");
-        assertEq(totalSharesAfterClaim, totalSharesBeforeClaim, "Total shares should not change when rewards are claimed");
+        assertEq(
+            userBalanceAfterClaim, userBalanceBeforeClaim, "User balance should not change when rewards are claimed"
+        );
+        assertEq(
+            totalDepositedAfterClaim,
+            totalDepositedBeforeClaim,
+            "Total deposited should not change when rewards are claimed"
+        );
+        assertEq(
+            totalSharesAfterClaim, totalSharesBeforeClaim, "Total shares should not change when rewards are claimed"
+        );
 
         // Fast forward to complete total withdrawal window (24 hours + 1 second)
         vm.warp(block.timestamp + 24 hours + 1 seconds);
@@ -1034,7 +1065,9 @@ contract AutoDolaVaultTest is Test {
         vault.totalWithdrawal(address(dolaToken), user1);
 
         // Verify total withdrawal completed successfully
-        assertEq(vault.balanceOf(address(dolaToken), user1), 0, "Total withdrawal should complete and zero user balance");
+        assertEq(
+            vault.balanceOf(address(dolaToken), user1), 0, "Total withdrawal should complete and zero user balance"
+        );
 
         // This test proves that reward claiming and total withdrawal are independent mechanisms
         // and that claiming rewards during pending withdrawal doesn't corrupt state
@@ -1158,7 +1191,11 @@ contract AutoDolaVaultTest is Test {
         vault.claimTokeRewards(user1);
 
         // Balance should remain unchanged when claiming with no rewards
-        assertEq(tokeToken.balanceOf(user1), recipientTokeBalanceAfter, "Balance should not change when claiming zero rewards");
+        assertEq(
+            tokeToken.balanceOf(user1),
+            recipientTokeBalanceAfter,
+            "Balance should not change when claiming zero rewards"
+        );
 
         // This improved test validates reward amounts at multiple points in the process
         // providing stronger guarantees about the accuracy of reward calculations

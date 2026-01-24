@@ -26,7 +26,7 @@ contract AutoDolaYieldExclusionTest is Test {
     address user2 = address(0x1357);
 
     uint256 constant INITIAL_DOLA_SUPPLY = 10000000e18; // 10M DOLA
-    uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18;  // 1M TOKE
+    uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18; // 1M TOKE
 
     function setUp() public {
         // Deploy mock tokens
@@ -42,11 +42,7 @@ contract AutoDolaYieldExclusionTest is Test {
         // Deploy the actual vault
         vm.prank(owner);
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(dolaToken),
-            address(tokeToken),
-            address(autoDolaVault),
-            address(mainRewarder)
+            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
         );
 
         // Mint tokens to test addresses
@@ -314,7 +310,9 @@ contract AutoDolaYieldExclusionTest is Test {
         assertEq(vault.balanceOf(address(dolaToken), user2), deposit2, "User2 principal unaffected");
 
         // Total deposited should only be user2's principal now
-        assertEq(vault.getTotalDeposited(address(dolaToken)), deposit2, "totalDeposited reflects only remaining principal");
+        assertEq(
+            vault.getTotalDeposited(address(dolaToken)), deposit2, "totalDeposited reflects only remaining principal"
+        );
 
         // Yield shares should still be in the vault
         assertTrue(mainRewarder.balanceOf(address(vault)) > 0, "Yield shares remain in vault");
