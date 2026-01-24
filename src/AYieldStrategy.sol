@@ -2,7 +2,7 @@
 pragma solidity ^0.8.13;
 
 import "./interfaces/IYieldStrategy.sol";
-import "pauser/src/interfaces/IPausable.sol";
+import "pauser/interfaces/IPausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
