@@ -2,18 +2,23 @@
 pragma solidity ^0.8.13;
 
 import "./interfaces/IYieldStrategy.sol";
+import "pauser/src/interfaces/IPausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title AYieldStrategy
  * @notice Abstract yield strategy contract with security features and access control
- * @dev Provides base implementation for yield strategy adapters with owner and multiple client access control
+ * @dev Provides base implementation for yield strategy adapters with owner and multiple client access control.
+ *      Implements IPausable for integration with the Global Pauser contract.
  */
-abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
-    
+abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, ReentrancyGuard, Pausable {
     // ============ STATE VARIABLES ============
+
+    /// @notice The authorized pauser address that can pause this contract
+    address private _pauser;
 
     /// @notice Mapping of addresses authorized to deposit/withdraw
     mapping(address => bool) public authorizedClients;
@@ -23,29 +28,29 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
 
     /// @notice Withdrawal status enumeration
     enum WithdrawalStatus {
-        None,       // No withdrawal initiated
-        Initiated,  // Withdrawal initiated, in 24-hour waiting period
+        None, // No withdrawal initiated
+        Initiated, // Withdrawal initiated, in 24-hour waiting period
         Executable, // Past waiting period, within 48-hour execution window
-        Expired     // Past execution window, state reset needed
+        Expired // Past execution window, state reset needed
     }
 
     /// @notice Structure to track withdrawal state per token/client combination
     struct WithdrawalState {
-        uint256 initiatedAt;        // Timestamp when withdrawal was initiated
-        WithdrawalStatus status;    // Current status of the withdrawal
-        uint256 balance;           // Cached balance at initiation time
+        uint256 initiatedAt; // Timestamp when withdrawal was initiated
+        WithdrawalStatus status; // Current status of the withdrawal
+        uint256 balance; // Cached balance at initiation time
     }
 
     /// @notice Mapping to track withdrawal states: token => client => WithdrawalState
     mapping(address => mapping(address => WithdrawalState)) public withdrawalStates;
 
     /// @notice Time constants for withdrawal phases
-    uint256 public constant WAITING_PERIOD = 24 hours;    // Phase 1 duration
-    uint256 public constant EXECUTION_WINDOW = 48 hours;  // Phase 2 duration
+    uint256 public constant WAITING_PERIOD = 24 hours; // Phase 1 duration
+    uint256 public constant EXECUTION_WINDOW = 48 hours; // Phase 2 duration
     uint256 public constant TOTAL_DURATION = WAITING_PERIOD + EXECUTION_WINDOW; // 72 hours total
-    
+
     // ============ EVENTS ============
-    
+
     /**
      * @notice Emitted when client authorization is updated
      * @param client The client address whose authorization was changed
@@ -69,19 +74,22 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @param recipient The address that received the withdrawn tokens
      */
     event WithdrawnFrom(
-        address indexed token,
-        address indexed client,
-        address indexed withdrawer,
-        uint256 amount,
-        address recipient
+        address indexed token, address indexed client, address indexed withdrawer, uint256 amount, address recipient
     );
-    
+
     /**
      * @notice Emitted when an emergency withdrawal is performed
      * @param owner The owner who performed the withdrawal
      * @param amount The amount withdrawn
      */
     event EmergencyWithdraw(address indexed owner, uint256 amount);
+
+    /**
+     * @notice Emitted when the pauser address is updated
+     * @param oldPauser The previous pauser address
+     * @param newPauser The new pauser address
+     */
+    event PauserSet(address indexed oldPauser, address indexed newPauser);
 
     /**
      * @notice Emitted when a total withdrawal is initiated (Phase 1)
@@ -92,11 +100,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @param executableAt The timestamp when Phase 2 becomes available
      */
     event WithdrawalInitiated(
-        address indexed token,
-        address indexed client,
-        uint256 balance,
-        uint256 initiatedAt,
-        uint256 executableAt
+        address indexed token, address indexed client, uint256 balance, uint256 initiatedAt, uint256 executableAt
     );
 
     /**
@@ -106,13 +110,8 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @param amount The amount that was withdrawn
      * @param executedAt The timestamp when the withdrawal was executed
      */
-    event WithdrawalExecuted(
-        address indexed token,
-        address indexed client,
-        uint256 amount,
-        uint256 executedAt
-    );
-    
+    event WithdrawalExecuted(address indexed token, address indexed client, uint256 amount, uint256 executedAt);
+
     // ============ MODIFIERS ============
 
     /**
@@ -132,9 +131,18 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
         require(authorizedWithdrawers[msg.sender], "AYieldStrategy: unauthorized, only authorized withdrawers");
         _;
     }
-    
+
+    /**
+     * @notice Restricts access to only the authorized pauser address
+     * @dev Reverts if the caller is not the pauser
+     */
+    modifier onlyPauser() {
+        require(msg.sender == _pauser, "AYieldStrategy: caller is not the pauser");
+        _;
+    }
+
     // ============ CONSTRUCTOR ============
-    
+
     /**
      * @notice Initialize the vault with initial owner
      * @param _owner The initial owner of the contract
@@ -142,9 +150,9 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
     constructor(address _owner) Ownable(_owner) {
         require(_owner != address(0), "AYieldStrategy: owner cannot be zero address");
     }
-    
+
     // ============ OWNER FUNCTIONS ============
-    
+
     /**
      * @notice Set client authorization for deposit/withdraw operations
      * @param client The address of the client contract
@@ -172,7 +180,45 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
 
         emit WithdrawerAuthorizationSet(withdrawer, _auth);
     }
-    
+
+    /**
+     * @notice Set the authorized pauser address
+     * @param newPauser The new pauser address
+     * @dev Only the contract owner can call this function
+     */
+    function setPauser(address newPauser) external onlyOwner {
+        address oldPauser = _pauser;
+        _pauser = newPauser;
+
+        emit PauserSet(oldPauser, newPauser);
+    }
+
+    /**
+     * @notice Get the authorized pauser address
+     * @return The address authorized to pause/unpause this contract
+     * @dev Implements IPausable.pauser()
+     */
+    function pauser() external view override returns (address) {
+        return _pauser;
+    }
+
+    /**
+     * @notice Pause the contract
+     * @dev Only callable by the authorized pauser. Implements IPausable.pause()
+     */
+    function pause() external override onlyPauser {
+        _pause();
+    }
+
+    /**
+     * @notice Unpause the contract
+     * @dev Callable by the owner or the pauser (Behodler3 pattern). Implements IPausable.unpause()
+     */
+    function unpause() external override {
+        require(msg.sender == owner() || msg.sender == _pauser, "AYieldStrategy: caller is not the owner or pauser");
+        _unpause();
+    }
+
     /**
      * @notice Emergency withdraw function for owner to withdraw funds
      * @param amount The amount of tokens to withdraw
@@ -193,7 +239,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @dev Phase 1: Initiates 24-hour waiting period. Phase 2: Executes withdrawal within 48-hour window.
      *      Provides community protection against rugpulls while allowing legitimate fund migrations.
      */
-    function totalWithdrawal(address token, address client) external override onlyOwner nonReentrant {
+    function totalWithdrawal(address token, address client) external override onlyOwner nonReentrant whenNotPaused {
         require(token != address(0), "AYieldStrategy: token cannot be zero address");
         require(client != address(0), "AYieldStrategy: client cannot be zero address");
 
@@ -231,12 +277,12 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @param recipient The address that will receive the withdrawn tokens
      * @dev Only authorized withdrawers can call this function. This is used to extract surplus yield.
      */
-    function withdrawFrom(
-        address token,
-        address client,
-        uint256 amount,
-        address recipient
-    ) external onlyAuthorizedWithdrawer nonReentrant {
+    function withdrawFrom(address token, address client, uint256 amount, address recipient)
+        external
+        onlyAuthorizedWithdrawer
+        nonReentrant
+        whenNotPaused
+    {
         require(token != address(0), "AYieldStrategy: token cannot be zero address");
         require(client != address(0), "AYieldStrategy: client cannot be zero address");
         require(recipient != address(0), "AYieldStrategy: recipient cannot be zero address");
@@ -253,7 +299,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
     }
 
     // ============ VIRTUAL FUNCTIONS ============
-    
+
     /**
      * @notice Internal emergency withdraw implementation to be overridden by concrete contracts
      * @param amount The amount of tokens to withdraw
@@ -279,9 +325,9 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @dev Must be implemented by concrete vault contracts to define withdrawFrom logic
      */
     function _withdrawFrom(address token, address client, uint256 amount, address recipient) internal virtual;
-    
+
     // ============ VIRTUAL FUNCTIONS ============
-    
+
     /**
      * @notice Deposit tokens into the vault
      * @param token The token address to deposit
@@ -290,7 +336,7 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @dev Must be overridden by concrete contracts - implement onlyAuthorizedClient access control
      */
     function deposit(address token, uint256 amount, address recipient) external virtual override;
-    
+
     /**
      * @notice Withdraw tokens from the vault
      * @param token The token address to withdraw
@@ -330,12 +376,9 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @param state The withdrawal state to initialize
      * @param currentTime The current block timestamp
      */
-    function _initiateWithdrawal(
-        address token,
-        address client,
-        WithdrawalState storage state,
-        uint256 currentTime
-    ) internal {
+    function _initiateWithdrawal(address token, address client, WithdrawalState storage state, uint256 currentTime)
+        internal
+    {
         // Get current balance
         uint256 balance = this.balanceOf(token, client);
         require(balance > 0, "AYieldStrategy: no balance to withdraw");
@@ -357,12 +400,9 @@ abstract contract AYieldStrategy is IYieldStrategy, Ownable, ReentrancyGuard {
      * @param state The withdrawal state to process
      * @param currentTime The current block timestamp
      */
-    function _executeWithdrawal(
-        address token,
-        address client,
-        WithdrawalState storage state,
-        uint256 currentTime
-    ) internal {
+    function _executeWithdrawal(address token, address client, WithdrawalState storage state, uint256 currentTime)
+        internal
+    {
         uint256 withdrawAmount = state.balance;
 
         // Reset state before external call to prevent reentrancy issues

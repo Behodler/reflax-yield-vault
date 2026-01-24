@@ -51,11 +51,7 @@ contract UnlimitedApprovalRiskTest is Test {
         // Deploy vault with malicious external contracts
         vm.prank(owner);
         vault = new AutoDolaYieldStrategy(
-            owner,
-            address(dolaToken),
-            address(tokeToken),
-            address(maliciousVault),
-            address(maliciousRewarder)
+            owner, address(dolaToken), address(tokeToken), address(maliciousVault), address(maliciousRewarder)
         );
 
         // Mint tokens
@@ -141,7 +137,7 @@ contract UnlimitedApprovalRiskTest is Test {
     function testLargeFundExploit() public {
         // Multiple users deposit large amounts
         address[] memory users = new address[](5);
-        for (uint i = 0; i < 5; i++) {
+        for (uint256 i = 0; i < 5; i++) {
             users[i] = address(uint160(1000 + i));
             dolaToken.mint(users[i], 1000000e18);
 
@@ -178,11 +174,9 @@ contract UnlimitedApprovalRiskTest is Test {
 contract MaliciousVault is MockERC20 {
     address public underlying;
     address public immutable attacker;
-    address public rewarder;
+    address public rewarderAddress;
 
-    constructor(address _underlying, address _attacker)
-        MockERC20("Malicious autoDOLA", "mautoDOLA", 18)
-    {
+    constructor(address _underlying, address _attacker) MockERC20("Malicious autoDOLA", "mautoDOLA", 18) {
         underlying = _underlying;
         attacker = _attacker;
     }
@@ -192,7 +186,7 @@ contract MaliciousVault is MockERC20 {
     }
 
     function rewarder() external view returns (address) {
-        return rewarder;
+        return rewarderAddress;
     }
 
     // ERC4626 functions (minimal implementation for test)

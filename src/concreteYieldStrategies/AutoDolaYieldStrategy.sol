@@ -46,11 +46,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @param sharesReceived The amount of autoDOLA shares received
      */
     event DolaDeposited(
-        address indexed token,
-        address indexed client,
-        address indexed recipient,
-        uint256 amount,
-        uint256 sharesReceived
+        address indexed token, address indexed client, address indexed recipient, uint256 amount, uint256 sharesReceived
     );
 
     /**
@@ -62,11 +58,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @param sharesBurned The amount of autoDOLA shares burned
      */
     event DolaWithdrawn(
-        address indexed token,
-        address indexed client,
-        address indexed recipient,
-        uint256 amount,
-        uint256 sharesBurned
+        address indexed token, address indexed client, address indexed recipient, uint256 amount, uint256 sharesBurned
     );
 
     /**
@@ -86,13 +78,9 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @param _autoDolaVault The autoDOLA vault address
      * @param _mainRewarder The MainRewarder address
      */
-    constructor(
-        address _owner,
-        address _dolaToken,
-        address _tokeToken,
-        address _autoDolaVault,
-        address _mainRewarder
-    ) AYieldStrategy(_owner) {
+    constructor(address _owner, address _dolaToken, address _tokeToken, address _autoDolaVault, address _mainRewarder)
+        AYieldStrategy(_owner)
+    {
         require(_dolaToken != address(0), "AutoDolaYieldStrategy: DOLA token cannot be zero address");
         require(_tokeToken != address(0), "AutoDolaYieldStrategy: TOKE token cannot be zero address");
         require(_autoDolaVault != address(0), "AutoDolaYieldStrategy: autoDOLA vault cannot be zero address");
@@ -192,7 +180,13 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @param recipient The address that will own the deposited tokens
      * @dev Only authorized clients can call this function
      */
-    function deposit(address token, uint256 amount, address recipient) external override onlyAuthorizedClient nonReentrant {
+    function deposit(address token, uint256 amount, address recipient)
+        external
+        override
+        onlyAuthorizedClient
+        nonReentrant
+        whenNotPaused
+    {
         require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
         require(amount > 0, "AutoDolaYieldStrategy: amount must be greater than zero");
         require(recipient != address(0), "AutoDolaYieldStrategy: recipient cannot be zero address");
@@ -237,7 +231,13 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      *      - Dust handling: Amount capped to available balance prevents final withdrawal
      *        from reverting due to accumulated rounding differences.
      */
-    function withdraw(address token, uint256 amount, address recipient) external override onlyAuthorizedClient nonReentrant {
+    function withdraw(address token, uint256 amount, address recipient)
+        external
+        override
+        onlyAuthorizedClient
+        nonReentrant
+        whenNotPaused
+    {
         require(token == address(dolaToken), "AutoDolaYieldStrategy: only DOLA token supported");
         require(amount > 0, "AutoDolaYieldStrategy: amount must be greater than zero");
         require(recipient != address(0), "AutoDolaYieldStrategy: recipient cannot be zero address");
@@ -287,7 +287,7 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
      * @param recipient The address that will receive the TOKE rewards
      * @dev Only the owner can call this function for security
      */
-    function claimTokeRewards(address recipient) external onlyOwner {
+    function claimTokeRewards(address recipient) external onlyOwner whenNotPaused {
         require(recipient != address(0), "AutoDolaYieldStrategy: recipient cannot be zero address");
 
         uint256 rewardsBefore = tokeToken.balanceOf(address(this));
@@ -403,7 +403,10 @@ contract AutoDolaYieldStrategy is AYieldStrategy {
 
         // CRITICAL: withdrawFrom is ONLY for surplus extraction
         // If you need to withdraw principal, use totalWithdrawal() with timelock protection
-        require(amount <= surplus, "AutoDolaYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal");
+        require(
+            amount <= surplus,
+            "AutoDolaYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal"
+        );
 
         // Unstake ALL shares to ensure we have them available for withdrawal
         uint256 totalShares = mainRewarder.balanceOf(address(this));
