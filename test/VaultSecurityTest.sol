@@ -2,9 +2,9 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "../src/mocks/MockAutoDOLA.sol";
+import "./mocks/MockAutoPool.sol";
 import "../src/mocks/MockMainRewarder.sol";
 import "../src/AYieldStrategy.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
@@ -13,13 +13,13 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  * @title VaultSecurityTest
  * @notice Comprehensive test suite for Vault contract security features
  * @dev Tests all access control mechanisms, owner functions, and security edge cases
- * @dev Uses AutoDolaYieldStrategy (real implementation) with mocked external dependencies
+ * @dev Uses AutoPoolYieldStrategy (real implementation) with mocked external dependencies
  */
 contract VaultSecurityTest is Test {
-    AutoDolaYieldStrategy public vault;
+    AutoPoolYieldStrategy public vault;
     MockERC20 public token;
     MockERC20 public tokeToken;
-    MockAutoDOLA public autoDolaVault;
+    MockAutoPool public autoPoolVault;
     MockMainRewarder public mainRewarder;
 
     address public owner = makeAddr("owner");
@@ -35,11 +35,11 @@ contract VaultSecurityTest is Test {
 
         // Deploy mock external dependencies
         mainRewarder = new MockMainRewarder(address(tokeToken));
-        autoDolaVault = new MockAutoDOLA(address(token), address(mainRewarder));
+        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(token), address(mainRewarder));
 
-        // Deploy the real AutoDolaYieldStrategy
-        vault = new AutoDolaYieldStrategy(
-            owner, address(token), address(tokeToken), address(autoDolaVault), address(mainRewarder)
+        // Deploy the real AutoPoolYieldStrategy
+        vault = new AutoPoolYieldStrategy(
+            owner, address(token), address(tokeToken), address(autoPoolVault), address(mainRewarder)
         );
 
         // Setup initial tokens
@@ -47,7 +47,7 @@ contract VaultSecurityTest is Test {
         token.mint(user2, 1000000 * 1e18);
         token.mint(attacker, 1000000 * 1e18);
         token.mint(bondingCurve, 10000000 * 1e18); // Give tokens to bonding curve for tests
-        token.mint(address(autoDolaVault), 10000000 * 1e18); // For autoDOLA mock
+        token.mint(address(autoPoolVault), 10000000 * 1e18); // For autoPool mock
 
         // Set bonding curve address as authorized client
         vm.prank(owner);
@@ -73,9 +73,9 @@ contract VaultSecurityTest is Test {
         vault.deposit(address(token), principalAmount, bondingCurve);
         vm.stopPrank();
 
-        // Simulate yield by minting tokens to the autoDOLA vault
+        // Simulate yield by minting tokens to the autoPool vault
         if (surplusAmount > 0) {
-            token.mint(address(autoDolaVault), surplusAmount);
+            token.mint(address(autoPoolVault), surplusAmount);
         }
     }
 
@@ -251,11 +251,11 @@ contract VaultSecurityTest is Test {
         vm.startPrank(bondingCurve);
 
         // Zero amount should revert
-        vm.expectRevert("AutoDolaYieldStrategy: amount must be greater than zero");
+        vm.expectRevert("AutoPoolYieldStrategy: amount must be greater than zero");
         vault.deposit(address(token), 0, user1);
 
         // Zero recipient address should revert
-        vm.expectRevert("AutoDolaYieldStrategy: recipient cannot be zero address");
+        vm.expectRevert("AutoPoolYieldStrategy: recipient cannot be zero address");
         vault.deposit(address(token), amount, address(0));
 
         vm.stopPrank();
@@ -271,11 +271,11 @@ contract VaultSecurityTest is Test {
         vm.startPrank(bondingCurve);
 
         // Zero amount should revert
-        vm.expectRevert("AutoDolaYieldStrategy: amount must be greater than zero");
+        vm.expectRevert("AutoPoolYieldStrategy: amount must be greater than zero");
         vault.withdraw(address(token), 0, user1);
 
         // Zero recipient address should revert
-        vm.expectRevert("AutoDolaYieldStrategy: recipient cannot be zero address");
+        vm.expectRevert("AutoPoolYieldStrategy: recipient cannot be zero address");
         vault.withdraw(address(token), 500 * 1e18, address(0));
 
         vm.stopPrank();
@@ -337,8 +337,8 @@ contract VaultSecurityTest is Test {
         assertTrue(vault.authorizedClients(anotherClient));
     }
 
-    // Note: testMultipleTokensAccessControl removed - AutoDolaYieldStrategy is bound to a single token
-    // Multi-token support is not part of the AutoDolaYieldStrategy design
+    // Note: testMultipleTokensAccessControl removed - AutoPoolYieldStrategy is bound to a single token
+    // Multi-token support is not part of the AutoPoolYieldStrategy design
 
     // ============ EVENTS TESTING ============
 

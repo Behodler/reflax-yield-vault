@@ -4,23 +4,23 @@ pragma solidity ^0.8.13;
 import "forge-std/Test.sol";
 import "../src/SurplusWithdrawer.sol";
 import "../src/SurplusTracker.sol";
-import "../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "../src/mocks/MockAutoDOLA.sol";
+import "./mocks/MockAutoPool.sol";
 import "../src/mocks/MockMainRewarder.sol";
 
 /**
  * @title SurplusWithdrawerTest
  * @notice Comprehensive unit tests for SurplusWithdrawer contract
- * @dev Uses AutoDolaYieldStrategy (real implementation) with mocked external dependencies
+ * @dev Uses AutoPoolYieldStrategy (real implementation) with mocked external dependencies
  */
 contract SurplusWithdrawerTest is Test {
     SurplusWithdrawer public withdrawer;
     SurplusTracker public tracker;
-    AutoDolaYieldStrategy public vault;
+    AutoPoolYieldStrategy public vault;
     MockERC20 public token;
     MockERC20 public tokeToken;
-    MockAutoDOLA public autoDolaVault;
+    MockAutoPool public autoPoolVault;
     MockMainRewarder public mainRewarder;
 
     address public owner;
@@ -56,11 +56,11 @@ contract SurplusWithdrawerTest is Test {
 
         // Deploy mock external dependencies
         mainRewarder = new MockMainRewarder(address(tokeToken));
-        autoDolaVault = new MockAutoDOLA(address(token), address(mainRewarder));
+        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(token), address(mainRewarder));
 
-        // Deploy the real AutoDolaYieldStrategy
-        vault = new AutoDolaYieldStrategy(
-            owner, address(token), address(tokeToken), address(autoDolaVault), address(mainRewarder)
+        // Deploy the real AutoPoolYieldStrategy
+        vault = new AutoPoolYieldStrategy(
+            owner, address(token), address(tokeToken), address(autoPoolVault), address(mainRewarder)
         );
 
         // Deploy withdrawer
@@ -73,9 +73,9 @@ contract SurplusWithdrawerTest is Test {
         // Configure withdrawer with token, vault, yieldStrategy, and client
         withdrawer.configure(address(token), address(vault), address(vault), client);
 
-        // Mint tokens to client and autoDolaVault for testing
+        // Mint tokens to client and autoPoolVault for testing
         token.mint(client, 10000e18);
-        token.mint(address(autoDolaVault), 10000e18); // For autoDOLA mock
+        token.mint(address(autoPoolVault), 10000e18); // For autoPool mock
     }
 
     // ============ HELPER FUNCTIONS ============
@@ -95,7 +95,7 @@ contract SurplusWithdrawerTest is Test {
 
         // Simulate yield if surplus is needed
         if (surplusAmount > 0) {
-            autoDolaVault.simulateYield(surplusAmount);
+            autoPoolVault.simulateYield(surplusAmount);
         }
     }
 
@@ -182,9 +182,9 @@ contract SurplusWithdrawerTest is Test {
         MockERC20 newToken = new MockERC20("New Token", "NEW", 18);
         MockERC20 newTokeToken = new MockERC20("TOKE2", "TOKE2", 18);
         MockMainRewarder newRewarder = new MockMainRewarder(address(newTokeToken));
-        MockAutoDOLA newAutoDolaVault = new MockAutoDOLA(address(newToken), address(newRewarder));
-        AutoDolaYieldStrategy newVault = new AutoDolaYieldStrategy(
-            owner, address(newToken), address(newTokeToken), address(newAutoDolaVault), address(newRewarder)
+        MockAutoPool newAutoPoolVault = new MockAutoPool("AutoPool2", "autoPool2", address(newToken), address(newRewarder));
+        AutoPoolYieldStrategy newVault = new AutoPoolYieldStrategy(
+            owner, address(newToken), address(newTokeToken), address(newAutoPoolVault), address(newRewarder)
         );
         address newClient = address(0x99);
 
@@ -402,7 +402,7 @@ contract SurplusWithdrawerTest is Test {
         // Setup: Client has principal of 900 and surplus of 100
         setupPrincipalAndSurplus(900e18, 100e18);
 
-        // Get initial principal (balanceOf returns principal in AutoDolaYieldStrategy)
+        // Get initial principal (balanceOf returns principal in AutoPoolYieldStrategy)
         uint256 initialPrincipal = vault.balanceOf(address(token), client);
         assertEq(initialPrincipal, 900e18, "Initial principal should be 900");
 

@@ -2,9 +2,9 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "../../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "../../src/mocks/MockERC20.sol";
-import "../../src/mocks/MockAutoDOLA.sol";
+import "../mocks/MockAutoPool.sol";
 import "../../src/mocks/MockMainRewarder.sol";
 
 /**
@@ -24,10 +24,10 @@ import "../../src/mocks/MockMainRewarder.sol";
  * SEVERITY: N/A (correct behavior, no vulnerability)
  */
 contract EmergencyWithdrawYieldLossTest is Test {
-    AutoDolaYieldStrategy vault;
-    MockERC20 dolaToken;
+    AutoPoolYieldStrategy vault;
+    MockERC20 underlyingToken;
     MockERC20 tokeToken;
-    MockAutoDOLA autoDolaVault;
+    MockAutoPool autoPoolVault;
     MockMainRewarder mainRewarder;
 
     address owner = address(0x1234);
@@ -38,26 +38,26 @@ contract EmergencyWithdrawYieldLossTest is Test {
 
     function setUp() public {
         // Deploy mock tokens
-        dolaToken = new MockERC20("DOLA", "DOLA", 18);
+        underlyingToken = new MockERC20("Underlying", "UNDERLYING", 18);
         tokeToken = new MockERC20("TOKE", "TOKE", 18);
 
         // Deploy mock contracts
         mainRewarder = new MockMainRewarder(address(tokeToken));
-        autoDolaVault = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
+        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(underlyingToken), address(mainRewarder));
 
         // Enable realistic transfer mode for security tests
         // This makes the mock actually transfer shares, simulating real Tokemak behavior
-        mainRewarder.setShareToken(address(autoDolaVault));
+        mainRewarder.setShareToken(address(autoPoolVault));
 
         // Deploy vault
         vm.prank(owner);
-        vault = new AutoDolaYieldStrategy(
-            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
+        vault = new AutoPoolYieldStrategy(
+            owner, address(underlyingToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
         );
 
         // Mint tokens
-        dolaToken.mint(client, INITIAL_SUPPLY);
-        dolaToken.mint(address(autoDolaVault), INITIAL_SUPPLY);
+        underlyingToken.mint(client, INITIAL_SUPPLY);
+        underlyingToken.mint(address(autoPoolVault), INITIAL_SUPPLY);
         tokeToken.mint(address(mainRewarder), INITIAL_SUPPLY);
 
         // Authorize client
@@ -72,9 +72,9 @@ contract EmergencyWithdrawYieldLossTest is Test {
         // Setup: User deposits funds
         uint256 depositAmount = 10000e18;
         vm.prank(client);
-        dolaToken.approve(address(vault), depositAmount);
+        underlyingToken.approve(address(vault), depositAmount);
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, user1);
+        vault.deposit(address(underlyingToken), depositAmount, user1);
 
         // Verify shares are staked
         uint256 stakedSharesBefore = mainRewarder.balanceOf(address(vault));
@@ -87,7 +87,7 @@ contract EmergencyWithdrawYieldLossTest is Test {
 
         // CORRECT BEHAVIOR: Remaining shares stay staked
         uint256 stakedSharesAfter = mainRewarder.balanceOf(address(vault));
-        uint256 unstakedShares = autoDolaVault.balanceOf(address(vault));
+        uint256 unstakedShares = autoPoolVault.balanceOf(address(vault));
 
         // Remaining shares should stay staked in MainRewarder
         assertGt(stakedSharesAfter, 0, "Remaining shares should stay staked");
@@ -103,9 +103,9 @@ contract EmergencyWithdrawYieldLossTest is Test {
         // Setup: User deposits funds
         uint256 depositAmount = 10000e18;
         vm.prank(client);
-        dolaToken.approve(address(vault), depositAmount);
+        underlyingToken.approve(address(vault), depositAmount);
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, user1);
+        vault.deposit(address(underlyingToken), depositAmount, user1);
 
         // Fast forward time to accumulate TOKE rewards
         vm.warp(block.timestamp + 7 days);
@@ -140,18 +140,18 @@ contract EmergencyWithdrawYieldLossTest is Test {
         // Setup: User deposits funds
         uint256 depositAmount = 10000e18;
         vm.prank(client);
-        dolaToken.approve(address(vault), depositAmount);
+        underlyingToken.approve(address(vault), depositAmount);
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, client);
+        vault.deposit(address(underlyingToken), depositAmount, client);
 
         // User performs regular withdrawal of 50%
         uint256 withdrawAmount = 5000e18;
         vm.prank(client);
-        vault.withdraw(address(dolaToken), withdrawAmount, client);
+        vault.withdraw(address(underlyingToken), withdrawAmount, client);
 
         // CORRECT BEHAVIOR: Remaining shares should be re-staked
         uint256 stakedSharesAfter = mainRewarder.balanceOf(address(vault));
-        uint256 unstakedShares = autoDolaVault.balanceOf(address(vault));
+        uint256 unstakedShares = autoPoolVault.balanceOf(address(vault));
 
         assertGt(stakedSharesAfter, 0, "Remaining shares should be re-staked");
         assertEq(unstakedShares, 0, "No shares should be sitting unstaked");
@@ -169,9 +169,9 @@ contract EmergencyWithdrawYieldLossTest is Test {
         // Setup: User deposits funds
         uint256 depositAmount = 10000e18;
         vm.prank(client);
-        dolaToken.approve(address(vault), depositAmount);
+        underlyingToken.approve(address(vault), depositAmount);
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, user1);
+        vault.deposit(address(underlyingToken), depositAmount, user1);
 
         // Owner performs emergency withdrawal
         uint256 emergencyAmount = 5000e18;
@@ -179,15 +179,15 @@ contract EmergencyWithdrawYieldLossTest is Test {
         vault.emergencyWithdraw(emergencyAmount);
 
         // User principal should remain accurate
-        uint256 userPrincipal = vault.principalOf(address(dolaToken), user1);
+        uint256 userPrincipal = vault.principalOf(address(underlyingToken), user1);
         assertEq(userPrincipal, depositAmount, "User principal should be unaffected");
 
         // User should still be able to withdraw their principal
         vm.prank(client);
-        vault.withdraw(address(dolaToken), depositAmount, user1);
+        vault.withdraw(address(underlyingToken), depositAmount, user1);
 
         // Verify withdrawal succeeded
-        uint256 principalAfter = vault.principalOf(address(dolaToken), user1);
+        uint256 principalAfter = vault.principalOf(address(underlyingToken), user1);
         assertEq(principalAfter, 0, "User should be able to withdraw full principal");
     }
 }

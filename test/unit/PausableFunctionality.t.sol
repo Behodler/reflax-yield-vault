@@ -2,20 +2,20 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "../../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "../../src/mocks/MockERC20.sol";
-import "../../src/mocks/MockAutoDOLA.sol";
+import "../mocks/MockAutoPool.sol";
 import "../../src/mocks/MockMainRewarder.sol";
 
 /**
  * @title PausableFunctionalityTest
- * @notice Unit tests for IPausable implementation in AYieldStrategy and AutoDolaYieldStrategy
+ * @notice Unit tests for IPausable implementation in AYieldStrategy and AutoPoolYieldStrategy
  */
 contract PausableFunctionalityTest is Test {
-    AutoDolaYieldStrategy vault;
-    MockERC20 dolaToken;
+    AutoPoolYieldStrategy vault;
+    MockERC20 underlyingToken;
     MockERC20 tokeToken;
-    MockAutoDOLA autoDolaVault;
+    MockAutoPool autoPoolVault;
     MockMainRewarder mainRewarder;
 
     address owner = address(0x1234);
@@ -25,29 +25,29 @@ contract PausableFunctionalityTest is Test {
     address withdrawer = address(0x1357);
     address randomUser = address(0x2468);
 
-    uint256 constant INITIAL_DOLA_SUPPLY = 10000000e18;
+    uint256 constant INITIAL_TOKEN_SUPPLY = 10000000e18;
     uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18;
 
     function setUp() public {
         // Deploy mock tokens
-        dolaToken = new MockERC20("DOLA", "DOLA", 18);
+        underlyingToken = new MockERC20("Underlying", "UNDERLYING", 18);
         tokeToken = new MockERC20("TOKE", "TOKE", 18);
 
         // Deploy mock MainRewarder
         mainRewarder = new MockMainRewarder(address(tokeToken));
 
-        // Deploy mock autoDOLA vault
-        autoDolaVault = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
+        // Deploy mock autoPool vault
+        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(underlyingToken), address(mainRewarder));
 
         // Deploy the vault
         vm.prank(owner);
-        vault = new AutoDolaYieldStrategy(
-            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
+        vault = new AutoPoolYieldStrategy(
+            owner, address(underlyingToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
         );
 
         // Mint tokens
-        dolaToken.mint(client, INITIAL_DOLA_SUPPLY);
-        dolaToken.mint(address(autoDolaVault), INITIAL_DOLA_SUPPLY);
+        underlyingToken.mint(client, INITIAL_TOKEN_SUPPLY);
+        underlyingToken.mint(address(autoPoolVault), INITIAL_TOKEN_SUPPLY);
         tokeToken.mint(address(mainRewarder), INITIAL_TOKE_SUPPLY);
 
         // Authorize client and withdrawer
@@ -57,9 +57,9 @@ contract PausableFunctionalityTest is Test {
         vault.setPauser(pauser);
         vm.stopPrank();
 
-        // Approve vault to spend client's DOLA
+        // Approve vault to spend client's underlying tokens
         vm.prank(client);
-        dolaToken.approve(address(vault), type(uint256).max);
+        underlyingToken.approve(address(vault), type(uint256).max);
     }
 
     // ============ setPauser() TESTS ============
@@ -109,8 +109,8 @@ contract PausableFunctionalityTest is Test {
     function testPauserReturnsZeroIfNotSet() public {
         // Deploy new vault without setting pauser
         vm.prank(owner);
-        AutoDolaYieldStrategy newVault = new AutoDolaYieldStrategy(
-            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
+        AutoPoolYieldStrategy newVault = new AutoPoolYieldStrategy(
+            owner, address(underlyingToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
         );
 
         assertEq(newVault.pauser(), address(0));
@@ -202,9 +202,9 @@ contract PausableFunctionalityTest is Test {
         uint256 depositAmount = 1000e18;
 
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, user);
+        vault.deposit(address(underlyingToken), depositAmount, user);
 
-        assertEq(vault.principalOf(address(dolaToken), user), depositAmount);
+        assertEq(vault.principalOf(address(underlyingToken), user), depositAmount);
     }
 
     function testDepositRevertsWhenPaused() public {
@@ -213,7 +213,7 @@ contract PausableFunctionalityTest is Test {
 
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         vm.prank(client);
-        vault.deposit(address(dolaToken), 1000e18, user);
+        vault.deposit(address(underlyingToken), 1000e18, user);
     }
 
     function testDepositWorksAfterUnpause() public {
@@ -229,9 +229,9 @@ contract PausableFunctionalityTest is Test {
 
         // Deposit should work
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, user);
+        vault.deposit(address(underlyingToken), depositAmount, user);
 
-        assertEq(vault.principalOf(address(dolaToken), user), depositAmount);
+        assertEq(vault.principalOf(address(underlyingToken), user), depositAmount);
     }
 
     // ============ whenNotPaused MODIFIER TESTS - withdraw() ============
@@ -242,13 +242,13 @@ contract PausableFunctionalityTest is Test {
 
         // Setup: deposit first
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, client);
+        vault.deposit(address(underlyingToken), depositAmount, client);
 
         // Withdraw should work
         vm.prank(client);
-        vault.withdraw(address(dolaToken), withdrawAmount, client);
+        vault.withdraw(address(underlyingToken), withdrawAmount, client);
 
-        assertEq(vault.principalOf(address(dolaToken), client), depositAmount - withdrawAmount);
+        assertEq(vault.principalOf(address(underlyingToken), client), depositAmount - withdrawAmount);
     }
 
     function testWithdrawRevertsWhenPaused() public {
@@ -256,7 +256,7 @@ contract PausableFunctionalityTest is Test {
 
         // Setup: deposit first
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, client);
+        vault.deposit(address(underlyingToken), depositAmount, client);
 
         // Pause
         vm.prank(pauser);
@@ -265,7 +265,7 @@ contract PausableFunctionalityTest is Test {
         // Withdraw should revert
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         vm.prank(client);
-        vault.withdraw(address(dolaToken), 500e18, client);
+        vault.withdraw(address(underlyingToken), 500e18, client);
     }
 
     // ============ whenNotPaused MODIFIER TESTS - withdrawFrom() ============
@@ -275,14 +275,14 @@ contract PausableFunctionalityTest is Test {
 
         // Setup: deposit first
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, client);
+        vault.deposit(address(underlyingToken), depositAmount, client);
 
         // Generate yield
-        autoDolaVault.simulateYield(1000e18);
+        autoPoolVault.simulateYield(1000e18);
 
         // WithdrawFrom should work
         vm.prank(withdrawer);
-        vault.withdrawFrom(address(dolaToken), client, 500e18, withdrawer);
+        vault.withdrawFrom(address(underlyingToken), client, 500e18, withdrawer);
     }
 
     function testWithdrawFromRevertsWhenPaused() public {
@@ -290,10 +290,10 @@ contract PausableFunctionalityTest is Test {
 
         // Setup: deposit first
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, client);
+        vault.deposit(address(underlyingToken), depositAmount, client);
 
         // Generate yield
-        autoDolaVault.simulateYield(1000e18);
+        autoPoolVault.simulateYield(1000e18);
 
         // Pause
         vm.prank(pauser);
@@ -302,7 +302,7 @@ contract PausableFunctionalityTest is Test {
         // WithdrawFrom should revert
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         vm.prank(withdrawer);
-        vault.withdrawFrom(address(dolaToken), client, 500e18, withdrawer);
+        vault.withdrawFrom(address(underlyingToken), client, 500e18, withdrawer);
     }
 
     // ============ whenNotPaused MODIFIER TESTS - totalWithdrawal() ============
@@ -312,7 +312,7 @@ contract PausableFunctionalityTest is Test {
 
         // Setup: deposit first
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, client);
+        vault.deposit(address(underlyingToken), depositAmount, client);
 
         // Pause
         vm.prank(pauser);
@@ -321,7 +321,7 @@ contract PausableFunctionalityTest is Test {
         // TotalWithdrawal should revert
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         vm.prank(owner);
-        vault.totalWithdrawal(address(dolaToken), client);
+        vault.totalWithdrawal(address(underlyingToken), client);
     }
 
     function testTotalWithdrawalWorksWhenNotPaused() public {
@@ -329,11 +329,11 @@ contract PausableFunctionalityTest is Test {
 
         // Setup: deposit first
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, client);
+        vault.deposit(address(underlyingToken), depositAmount, client);
 
         // Should work when not paused (initiates phase 1)
         vm.prank(owner);
-        vault.totalWithdrawal(address(dolaToken), client);
+        vault.totalWithdrawal(address(underlyingToken), client);
     }
 
     // ============ whenNotPaused MODIFIER TESTS - claimTokeRewards() ============
@@ -354,7 +354,7 @@ contract PausableFunctionalityTest is Test {
 
         // Setup: deposit first
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, client);
+        vault.deposit(address(underlyingToken), depositAmount, client);
 
         // Should work when not paused
         vm.prank(owner);
@@ -368,19 +368,19 @@ contract PausableFunctionalityTest is Test {
 
         // Setup: deposit first
         vm.prank(client);
-        vault.deposit(address(dolaToken), depositAmount, client);
+        vault.deposit(address(underlyingToken), depositAmount, client);
 
         // Pause
         vm.prank(pauser);
         vault.pause();
 
-        uint256 ownerBalanceBefore = dolaToken.balanceOf(owner);
+        uint256 ownerBalanceBefore = underlyingToken.balanceOf(owner);
 
         // Emergency withdraw should still work when paused
         vm.prank(owner);
         vault.emergencyWithdraw(500e18);
 
-        uint256 ownerBalanceAfter = dolaToken.balanceOf(owner);
+        uint256 ownerBalanceAfter = underlyingToken.balanceOf(owner);
         assertTrue(ownerBalanceAfter > ownerBalanceBefore);
     }
 

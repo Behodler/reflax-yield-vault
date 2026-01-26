@@ -2,9 +2,10 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "./AutoDolaVault.t.sol"; // Import for mock contracts
+import "./mocks/MockAutoPool.sol";
+import "../src/mocks/MockMainRewarder.sol";
 
 /**
  * @title ConvertToSharesRefactorTests
@@ -23,48 +24,48 @@ import "./AutoDolaVault.t.sol"; // Import for mock contracts
  *      - Test Specification: story-028-test-specification.md
  */
 contract ConvertToSharesRefactorTests is Test {
-    AutoDolaYieldStrategy vault;
-    MockERC20 dolaToken;
+    AutoPoolYieldStrategy vault;
+    MockERC20 underlyingToken;
     MockERC20 tokeToken;
-    MockAutoDOLA autoDolaVault;
+    MockAutoPool autoPoolVault;
     MockMainRewarder mainRewarder;
 
     address owner = address(0x1234);
     address client = address(0x5678);
     address user = address(0xDEF0);
 
-    uint256 constant INITIAL_DOLA_SUPPLY = 100000000e18; // 100M DOLA
+    uint256 constant INITIAL_TOKEN_SUPPLY = 100000000e18; // 100M tokens
     uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18; // 1M TOKE
 
     // Events
-    event DolaDeposited(
+    event Deposited(
         address indexed token, address indexed client, address indexed recipient, uint256 amount, uint256 sharesReceived
     );
 
-    event DolaWithdrawn(
+    event Withdrawn(
         address indexed token, address indexed client, address indexed recipient, uint256 amount, uint256 sharesBurned
     );
 
     function setUp() public {
         // Deploy mock tokens
-        dolaToken = new MockERC20("DOLA", "DOLA", 18);
+        underlyingToken = new MockERC20("Underlying", "UNDERLYING", 18);
         tokeToken = new MockERC20("TOKE", "TOKE", 18);
 
         // Deploy mock MainRewarder
         mainRewarder = new MockMainRewarder(address(tokeToken));
 
-        // Deploy mock autoDOLA vault
-        autoDolaVault = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
+        // Deploy mock autoPool vault
+        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(underlyingToken), address(mainRewarder));
 
-        // Deploy AutoDolaYieldStrategy
+        // Deploy AutoPoolYieldStrategy
         vm.prank(owner);
-        vault = new AutoDolaYieldStrategy(
-            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
+        vault = new AutoPoolYieldStrategy(
+            owner, address(underlyingToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
         );
 
         // Mint tokens
-        dolaToken.mint(client, INITIAL_DOLA_SUPPLY);
-        dolaToken.mint(address(autoDolaVault), INITIAL_DOLA_SUPPLY);
+        underlyingToken.mint(client, INITIAL_TOKEN_SUPPLY);
+        underlyingToken.mint(address(autoPoolVault), INITIAL_TOKEN_SUPPLY);
         tokeToken.mint(address(mainRewarder), INITIAL_TOKE_SUPPLY);
 
         // Authorize client
@@ -76,29 +77,29 @@ contract ConvertToSharesRefactorTests is Test {
 
     function _deposit(uint256 amount) internal returns (uint256 sharesReceived) {
         vm.prank(client);
-        dolaToken.approve(address(vault), amount);
+        underlyingToken.approve(address(vault), amount);
 
         uint256 sharesBefore = mainRewarder.balanceOf(address(vault));
 
         vm.prank(client);
-        vault.deposit(address(dolaToken), amount, user);
+        vault.deposit(address(underlyingToken), amount, user);
 
         uint256 sharesAfter = mainRewarder.balanceOf(address(vault));
         return sharesAfter - sharesBefore;
     }
 
     function _withdraw(uint256 amount) internal returns (uint256 dolaReceived) {
-        uint256 dolaBefore = dolaToken.balanceOf(user);
+        uint256 dolaBefore = underlyingToken.balanceOf(user);
 
         vm.prank(client);
-        vault.withdraw(address(dolaToken), amount, user);
+        vault.withdraw(address(underlyingToken), amount, user);
 
-        uint256 dolaAfter = dolaToken.balanceOf(user);
+        uint256 dolaAfter = underlyingToken.balanceOf(user);
         return dolaAfter - dolaBefore;
     }
 
     function _simulateYield(uint256 yieldAmount) internal {
-        autoDolaVault.simulateYield(yieldAmount);
+        autoPoolVault.simulateYield(yieldAmount);
     }
 
     // ============ TEST GROUP 1: YIELD-EXCLUSION VERIFICATION ============
@@ -154,18 +155,18 @@ contract ConvertToSharesRefactorTests is Test {
         _simulateYield(20e18);
 
         // Withdraw all remaining principal
-        uint256 remainingPrincipal = vault.balanceOf(address(dolaToken), user);
+        uint256 remainingPrincipal = vault.balanceOf(address(underlyingToken), user);
         totalPrincipalWithdrawn += _withdraw(remainingPrincipal);
 
         // Verify: total withdrawn ≤ total deposited
         assertLe(totalPrincipalWithdrawn, totalPrincipalDeposited, "Total withdrawn should not exceed deposited");
 
         // Verify: yield remains locked (~100 DOLA worth of shares)
-        uint256 vaultSharesValue = autoDolaVault.previewRedeem(mainRewarder.balanceOf(address(vault)));
+        uint256 vaultSharesValue = autoPoolVault.previewRedeem(mainRewarder.balanceOf(address(vault)));
         assertGt(vaultSharesValue, 90e18, "Accumulated yield should remain in vault");
 
         // User principal should be zero
-        assertEq(vault.balanceOf(address(dolaToken), user), 0, "User principal should be zero");
+        assertEq(vault.balanceOf(address(underlyingToken), user), 0, "User principal should be zero");
     }
 
     /**
@@ -192,7 +193,7 @@ contract ConvertToSharesRefactorTests is Test {
         );
 
         // Assert: Vault retains ~100 DOLA worth of shares (the yield)
-        uint256 remainingSharesValue = autoDolaVault.previewRedeem(mainRewarder.balanceOf(address(vault)));
+        uint256 remainingSharesValue = autoPoolVault.previewRedeem(mainRewarder.balanceOf(address(vault)));
         assertGt(remainingSharesValue, 95e18, "Vault should retain approximately 100 DOLA yield");
         assertLt(remainingSharesValue, 105e18, "Yield should be approximately 100 DOLA");
     }
@@ -260,7 +261,7 @@ contract ConvertToSharesRefactorTests is Test {
         _withdraw(333e18);
 
         // Check remaining principal
-        uint256 remainingPrincipal = vault.balanceOf(address(dolaToken), user);
+        uint256 remainingPrincipal = vault.balanceOf(address(underlyingToken), user);
 
         // Attempt to withdraw remaining principal (should succeed, not revert)
         uint256 received = _withdraw(remainingPrincipal);
@@ -269,7 +270,7 @@ contract ConvertToSharesRefactorTests is Test {
         assertTrue(received > 0 || remainingPrincipal == 0, "Final withdrawal should succeed");
 
         // Assert: All principal extracted or dust amount negligible
-        uint256 finalBalance = vault.balanceOf(address(dolaToken), user);
+        uint256 finalBalance = vault.balanceOf(address(underlyingToken), user);
         assertEq(finalBalance, 0, "User balance should be zero after final withdrawal");
     }
 
@@ -285,7 +286,7 @@ contract ConvertToSharesRefactorTests is Test {
 
         // Request withdrawal: 101 DOLA (more than available)
         uint256 withdrawRequest = 101e18;
-        uint256 balanceBefore = vault.balanceOf(address(dolaToken), user);
+        uint256 balanceBefore = vault.balanceOf(address(underlyingToken), user);
 
         // Should cap to 100 DOLA and succeed
         uint256 received = _withdraw(withdrawRequest);
@@ -295,7 +296,7 @@ contract ConvertToSharesRefactorTests is Test {
         assertLe(received, depositAmount, "Received should not exceed deposited");
 
         // Assert: clientBalances reduced to 0
-        uint256 balanceAfter = vault.balanceOf(address(dolaToken), user);
+        uint256 balanceAfter = vault.balanceOf(address(underlyingToken), user);
         assertEq(balanceAfter, 0, "Balance should be zero after capped withdrawal");
 
         // Verify the capping occurred (received ≈ 100, not 101)
@@ -329,7 +330,7 @@ contract ConvertToSharesRefactorTests is Test {
         assertLe(receivedWithExtremeYield, principal, "Even with extreme yield, user gets principal only");
 
         // Verify remaining shares represent massive yield
-        uint256 remainingValue = autoDolaVault.previewRedeem(mainRewarder.balanceOf(address(vault)));
+        uint256 remainingValue = autoPoolVault.previewRedeem(mainRewarder.balanceOf(address(vault)));
         assertGt(remainingValue, 5000e18, "Extreme yield should remain locked");
     }
 
@@ -346,13 +347,13 @@ contract ConvertToSharesRefactorTests is Test {
         _deposit(depositAmount);
 
         // Get vault state
-        uint256 totalShares = autoDolaVault.balanceOf(address(vault));
-        uint256 totalDeposited = vault.getTotalDeposited(address(dolaToken));
+        uint256 totalShares = autoPoolVault.balanceOf(address(vault));
+        uint256 totalDeposited = vault.getTotalDeposited(address(underlyingToken));
 
         // Calculate shares using both methods
         uint256 withdrawAmount = 500e18;
         uint256 methodA_shares = (totalShares * withdrawAmount) / totalDeposited; // Manual proportional
-        uint256 methodB_shares = autoDolaVault.convertToShares(withdrawAmount); // ERC4626 standard
+        uint256 methodB_shares = autoPoolVault.convertToShares(withdrawAmount); // ERC4626 standard
 
         // Assert: Methods should be equivalent when no yield
         uint256 difference =
@@ -362,10 +363,10 @@ contract ConvertToSharesRefactorTests is Test {
         // Now test with yield present
         _simulateYield(100e18); // 10% yield
 
-        totalShares = autoDolaVault.balanceOf(address(vault));
+        totalShares = autoPoolVault.balanceOf(address(vault));
 
         uint256 methodA_withYield = (totalShares * withdrawAmount) / totalDeposited;
-        uint256 methodB_withYield = autoDolaVault.convertToShares(withdrawAmount);
+        uint256 methodB_withYield = autoPoolVault.convertToShares(withdrawAmount);
 
         // Assert: Method B should give FEWER shares when yield present (preserves yield)
         assertLt(methodB_withYield, methodA_withYield, "convertToShares should give fewer shares with yield");
@@ -397,7 +398,7 @@ contract ConvertToSharesRefactorTests is Test {
         assertLe(received, depositAmount, "Should not receive more than principal");
 
         // Assert: Withdrawal completed successfully
-        uint256 remainingBalance = vault.balanceOf(address(dolaToken), user);
+        uint256 remainingBalance = vault.balanceOf(address(underlyingToken), user);
         assertEq(remainingBalance, 0, "Balance should be zero after full withdrawal");
     }
 
@@ -423,7 +424,7 @@ contract ConvertToSharesRefactorTests is Test {
         assertLe(received, withdrawAmount, "Should not receive more than requested");
 
         // Assert: Remaining principal tracked correctly
-        uint256 remainingPrincipal = vault.balanceOf(address(dolaToken), user);
+        uint256 remainingPrincipal = vault.balanceOf(address(underlyingToken), user);
         assertEq(remainingPrincipal, depositAmount - withdrawAmount, "Remaining principal should be tracked correctly");
     }
 
@@ -443,7 +444,7 @@ contract ConvertToSharesRefactorTests is Test {
 
         // Attempt to withdraw more than principal (1001 DOLA)
         uint256 excessiveRequest = 1001e18;
-        uint256 balanceBefore = vault.balanceOf(address(dolaToken), user);
+        uint256 balanceBefore = vault.balanceOf(address(underlyingToken), user);
 
         // Should cap to 1000 DOLA and succeed
         uint256 received = _withdraw(excessiveRequest);
@@ -455,7 +456,7 @@ contract ConvertToSharesRefactorTests is Test {
         assertGt(received, 0, "Transaction should succeed");
 
         // Verify user balance is now zero
-        uint256 balanceAfter = vault.balanceOf(address(dolaToken), user);
+        uint256 balanceAfter = vault.balanceOf(address(underlyingToken), user);
         assertEq(balanceAfter, 0, "User balance should be zero after capped withdrawal");
     }
 
@@ -483,7 +484,7 @@ contract ConvertToSharesRefactorTests is Test {
         assertGt(finalStaked, 0, "Yield shares should be re-staked");
 
         // Assert: Yield-bearing shares not lost
-        uint256 yieldSharesValue = autoDolaVault.previewRedeem(finalStaked);
+        uint256 yieldSharesValue = autoPoolVault.previewRedeem(finalStaked);
         assertGt(yieldSharesValue, 90e18, "Yield shares should be preserved and staked");
     }
 
@@ -501,23 +502,23 @@ contract ConvertToSharesRefactorTests is Test {
         }
 
         // Calculate expected vs actual vault state
-        uint256 totalDeposited = vault.getTotalDeposited(address(dolaToken));
+        uint256 totalDeposited = vault.getTotalDeposited(address(underlyingToken));
         uint256 actualShares = mainRewarder.balanceOf(address(vault));
-        uint256 expectedShares = autoDolaVault.convertToShares(totalDeposited);
+        uint256 expectedShares = autoPoolVault.convertToShares(totalDeposited);
 
         // Assert: Actual shares ≥ Expected shares (yield accumulation)
         assertGe(actualShares, expectedShares, "Actual shares should be at least expected shares");
 
         // Assert: Difference represents yield only, not accounting error
         uint256 sharesDifference = actualShares - expectedShares;
-        uint256 yieldValue = autoDolaVault.previewRedeem(sharesDifference);
+        uint256 yieldValue = autoPoolVault.previewRedeem(sharesDifference);
 
         // Yield should be positive (shares worth more than principal)
         assertGt(yieldValue, 0, "Difference should represent positive yield");
 
         // Verify surplus exists (total balance - principal > 0)
-        uint256 totalBalance = vault.totalBalanceOf(address(dolaToken), user);
-        uint256 userPrincipal = vault.principalOf(address(dolaToken), user);
+        uint256 totalBalance = vault.totalBalanceOf(address(underlyingToken), user);
+        uint256 userPrincipal = vault.principalOf(address(underlyingToken), user);
         if (userPrincipal > 0) {
             // If user has principal, their total balance should include yield
             assertGe(totalBalance, userPrincipal, "Total balance should be at least principal");
@@ -532,7 +533,7 @@ contract ConvertToSharesRefactorTests is Test {
     // ============ ADDITIONAL TESTS: EVENT EMISSION ============
 
     /**
-     * @notice Test 5.1: DolaWithdrawn event contains correct data
+     * @notice Test 5.1: Withdrawn event contains correct data
      * @dev Verifies event emission with correct sharesToRedeem (not recalculated)
      */
     function test_Group5_1_EventEmissionCorrect() public {
@@ -542,11 +543,11 @@ contract ConvertToSharesRefactorTests is Test {
         _deposit(depositAmount);
 
         // Calculate expected shares before withdrawal
-        uint256 expectedShares = autoDolaVault.convertToShares(withdrawAmount);
+        uint256 expectedShares = autoPoolVault.convertToShares(withdrawAmount);
 
         // Expect event with correct data
         vm.expectEmit(true, true, true, false); // Check indexed params, ignore data for now
-        emit DolaWithdrawn(address(dolaToken), client, user, 0, 0); // Placeholder
+        emit Withdrawn(address(underlyingToken), client, user, 0, 0); // Placeholder
 
         // Perform withdrawal
         _withdraw(withdrawAmount);
@@ -569,10 +570,10 @@ contract ConvertToSharesRefactorTests is Test {
         _simulateYield(100e18);
 
         // Calculate expected shares (should be fewer due to yield)
-        uint256 expectedShares = autoDolaVault.convertToShares(withdrawAmount);
+        uint256 expectedShares = autoPoolVault.convertToShares(withdrawAmount);
 
         // Verify expected shares is LESS than total shares (yield-exclusion)
-        uint256 totalShares = autoDolaVault.balanceOf(address(vault));
+        uint256 totalShares = autoPoolVault.balanceOf(address(vault));
         assertLt(expectedShares, totalShares, "Should redeem fewer shares than total when yield present");
 
         // Perform withdrawal (event should use actualShares, not convertToShares(dolaReceived))
@@ -591,19 +592,19 @@ contract ConvertToSharesRefactorTests is Test {
         // Cycle 1: Deposit 1000 DOLA
         uint256 deposit1 = 1000e18;
         _deposit(deposit1);
-        assertEq(vault.balanceOf(address(dolaToken), user), deposit1);
+        assertEq(vault.balanceOf(address(underlyingToken), user), deposit1);
 
         // Withdraw 1000 DOLA
         _withdraw(deposit1);
-        assertEq(vault.balanceOf(address(dolaToken), user), 0);
+        assertEq(vault.balanceOf(address(underlyingToken), user), 0);
 
         // Cycle 2: Deposit 500 DOLA again
         uint256 deposit2 = 500e18;
         _deposit(deposit2);
-        assertEq(vault.balanceOf(address(dolaToken), user), deposit2);
+        assertEq(vault.balanceOf(address(underlyingToken), user), deposit2);
 
         // Verify state correctly updated
-        uint256 totalDeposited = vault.getTotalDeposited(address(dolaToken));
+        uint256 totalDeposited = vault.getTotalDeposited(address(underlyingToken));
         assertEq(totalDeposited, deposit2, "Total deposited should reflect only second deposit");
     }
 
@@ -614,9 +615,9 @@ contract ConvertToSharesRefactorTests is Test {
     function test_Group6_2_ZeroWithdrawalReverts() public {
         _deposit(1000e18);
 
-        vm.expectRevert("AutoDolaYieldStrategy: amount must be greater than zero");
+        vm.expectRevert("AutoPoolYieldStrategy: amount must be greater than zero");
         vm.prank(client);
-        vault.withdraw(address(dolaToken), 0, user);
+        vault.withdraw(address(underlyingToken), 0, user);
     }
 
     /**
@@ -626,9 +627,9 @@ contract ConvertToSharesRefactorTests is Test {
     function test_Group6_3_ZeroAddressReverts() public {
         _deposit(1000e18);
 
-        vm.expectRevert("AutoDolaYieldStrategy: recipient cannot be zero address");
+        vm.expectRevert("AutoPoolYieldStrategy: recipient cannot be zero address");
         vm.prank(client);
-        vault.withdraw(address(dolaToken), 100e18, address(0));
+        vault.withdraw(address(underlyingToken), 100e18, address(0));
     }
 
     /**
@@ -642,6 +643,6 @@ contract ConvertToSharesRefactorTests is Test {
 
         vm.expectRevert(); // Will revert with access control error
         vm.prank(unauthorizedClient);
-        vault.withdraw(address(dolaToken), 100e18, user);
+        vault.withdraw(address(underlyingToken), 100e18, user);
     }
 }

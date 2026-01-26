@@ -2,36 +2,22 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "../src/mocks/MockAutoDOLA.sol";
+import "./mocks/MockAutoPool.sol";
 import "../src/mocks/MockMainRewarder.sol";
 
 /**
- * @title AutoDolaWithdrawalAndYieldTests
+ * @title AutoPoolWithdrawalAndYieldTests
  * @notice RED PHASE TEST - Comprehensive withdrawal accounting and yield exclusion tests
- * @dev This test suite establishes expected correct behavior for AutoDolaYieldStrategy
- *      withdrawal operations. Some tests may fail due to the known leftoverShares bug
- *      on line 228 of AutoDolaYieldStrategy.sol.
- *
- *      THE BUG:
- *      Line 228: uint256 leftoverShares = sharesToUnstake - sharesUsed;
- *      This calculation is done internally and can suffer from rounding errors.
- *      Instead, the contract should query the vault for remaining shares.
- *
- *      EXPECTED BEHAVIOR: Tests describe correct withdrawal and yield exclusion behavior
- *      ACTUAL BEHAVIOR: Some tests may fail, exposing the leftoverShares calculation bug
- *
- *      This is RED phase TDD - tests define correct behavior before implementation.
- *      A future GREEN phase story (019) will fix the bugs to make tests pass.
- *
- * @dev Story 018 - Part of autoDola-integration sprint addressing withdrawal accounting
+ * @dev This test suite establishes expected correct behavior for AutoPoolYieldStrategy
+ *      withdrawal operations.
  */
 contract AutoDolaWithdrawalAndYieldTests is Test {
-    AutoDolaYieldStrategy public vault;
-    MockERC20 public dolaToken;
+    AutoPoolYieldStrategy public vault;
+    MockERC20 public underlyingToken;
     MockERC20 public tokeToken;
-    MockAutoDOLA public autoDolaVault;
+    MockAutoPool public autoPoolVault;
     MockMainRewarder public mainRewarder;
 
     address public owner = address(1);
@@ -40,29 +26,29 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
     address public recipient1 = address(5);
     address public recipient2 = address(6);
 
-    // Events from AutoDolaYieldStrategy
-    event DolaDeposited(
+    // Events from AutoPoolYieldStrategy
+    event Deposited(
         address indexed token, address indexed client, address indexed recipient, uint256 amount, uint256 sharesReceived
     );
 
-    event DolaWithdrawn(
+    event Withdrawn(
         address indexed token, address indexed client, address indexed recipient, uint256 amount, uint256 sharesBurned
     );
 
     function setUp() public {
         // Deploy mock tokens
-        dolaToken = new MockERC20("DOLA", "DOLA", 18);
+        underlyingToken = new MockERC20("Underlying", "UNDERLYING", 18);
         tokeToken = new MockERC20("TOKE", "TOKE", 18);
 
         // Deploy mock MainRewarder
         mainRewarder = new MockMainRewarder(address(tokeToken));
 
-        // Deploy mock autoDOLA vault
-        autoDolaVault = new MockAutoDOLA(address(dolaToken), address(mainRewarder));
+        // Deploy mock autoPool vault
+        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(underlyingToken), address(mainRewarder));
 
-        // Deploy AutoDolaYieldStrategy
-        vault = new AutoDolaYieldStrategy(
-            owner, address(dolaToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
+        // Deploy AutoPoolYieldStrategy
+        vault = new AutoPoolYieldStrategy(
+            owner, address(underlyingToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
         );
 
         // Authorize clients
@@ -75,12 +61,12 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
     // ============ HELPER FUNCTIONS ============
 
     function _deposit(address client, uint256 amount, address recipient) internal returns (uint256 sharesReceived) {
-        dolaToken.mint(client, amount);
+        underlyingToken.mint(client, amount);
         vm.startPrank(client);
-        dolaToken.approve(address(vault), amount);
+        underlyingToken.approve(address(vault), amount);
 
         uint256 sharesBefore = mainRewarder.balanceOf(address(vault));
-        vault.deposit(address(dolaToken), amount, recipient);
+        vault.deposit(address(underlyingToken), amount, recipient);
         uint256 sharesAfter = mainRewarder.balanceOf(address(vault));
 
         vm.stopPrank();
@@ -88,16 +74,16 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
     }
 
     function _withdraw(address client, uint256 amount, address recipient) internal returns (uint256) {
-        uint256 balanceBefore = dolaToken.balanceOf(recipient);
+        uint256 balanceBefore = underlyingToken.balanceOf(recipient);
         vm.prank(client);
-        vault.withdraw(address(dolaToken), amount, recipient);
-        uint256 balanceAfter = dolaToken.balanceOf(recipient);
+        vault.withdraw(address(underlyingToken), amount, recipient);
+        uint256 balanceAfter = underlyingToken.balanceOf(recipient);
         return balanceAfter - balanceBefore;
     }
 
     function _simulateYield(uint256 yieldAmount) internal {
-        autoDolaVault.simulateYield(yieldAmount);
-        dolaToken.mint(address(autoDolaVault), yieldAmount);
+        autoPoolVault.simulateYield(yieldAmount);
+        underlyingToken.mint(address(autoPoolVault), yieldAmount);
     }
 
     // ============================================
@@ -115,7 +101,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _deposit(client1, depositAmount, recipient1);
 
         // Verify balance
-        uint256 balance = vault.balanceOf(address(dolaToken), recipient1);
+        uint256 balance = vault.balanceOf(address(underlyingToken), recipient1);
         assertEq(balance, depositAmount, "Balance should match deposit amount");
 
         // Withdraw entire balance
@@ -123,7 +109,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         // Should receive exactly principal
         assertEq(received, depositAmount, "User should receive exact principal with no yield");
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 0, "Balance should be zero after full withdrawal");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 0, "Balance should be zero after full withdrawal");
     }
 
     /**
@@ -136,12 +122,12 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         _deposit(client1, depositAmount, recipient1);
 
-        uint256 balanceBefore = vault.balanceOf(address(dolaToken), recipient1);
+        uint256 balanceBefore = vault.balanceOf(address(underlyingToken), recipient1);
         assertEq(balanceBefore, depositAmount, "Initial balance should match deposit");
 
         _withdraw(client1, withdrawAmount, recipient1);
 
-        uint256 balanceAfter = vault.balanceOf(address(dolaToken), recipient1);
+        uint256 balanceAfter = vault.balanceOf(address(underlyingToken), recipient1);
         assertEq(balanceAfter, depositAmount - withdrawAmount, "Balance should decrease by withdrawal amount");
     }
 
@@ -157,17 +143,17 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         // First withdrawal
         uint256 withdraw1 = 3000 ether;
         _withdraw(client1, withdraw1, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 7000 ether, "Balance after first withdrawal");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 7000 ether, "Balance after first withdrawal");
 
         // Second withdrawal
         uint256 withdraw2 = 2500 ether;
         _withdraw(client1, withdraw2, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 4500 ether, "Balance after second withdrawal");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 4500 ether, "Balance after second withdrawal");
 
         // Third withdrawal
         uint256 withdraw3 = 1500 ether;
         _withdraw(client1, withdraw3, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 3000 ether, "Balance after third withdrawal");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 3000 ether, "Balance after third withdrawal");
     }
 
     /**
@@ -184,13 +170,13 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 received1 = _withdraw(client1, partialAmount, recipient1);
         assertEq(received1, partialAmount, "Should receive partial amount");
 
-        uint256 remainingBalance = vault.balanceOf(address(dolaToken), recipient1);
+        uint256 remainingBalance = vault.balanceOf(address(underlyingToken), recipient1);
         assertEq(remainingBalance, 5000 ether, "Remaining balance should be correct");
 
         // Full withdrawal of remainder
         uint256 received2 = _withdraw(client1, remainingBalance, recipient1);
         assertEq(received2, remainingBalance, "Should receive remaining balance");
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 0, "Final balance should be zero");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 0, "Final balance should be zero");
     }
 
     /**
@@ -243,7 +229,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         uint256 withdrawAmount = 2000 ether;
         _withdraw(client1, withdrawAmount, recipient1);
 
-        uint256 balanceAfterWithdraw = vault.balanceOf(address(dolaToken), recipient1);
+        uint256 balanceAfterWithdraw = vault.balanceOf(address(underlyingToken), recipient1);
         assertEq(balanceAfterWithdraw, 3000 ether, "Balance after withdrawal");
 
         // Re-deposit
@@ -253,7 +239,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         // User balance should be sum of remaining + re-deposit, NOT including yield
         uint256 expectedBalance = balanceAfterWithdraw + reDepositAmount;
         assertEq(
-            vault.balanceOf(address(dolaToken), recipient1),
+            vault.balanceOf(address(underlyingToken), recipient1),
             expectedBalance,
             "Balance should be principal only, no yield access from re-deposit"
         );
@@ -280,9 +266,9 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         // Partial withdrawal
         uint256 withdrawAmount = 3333 ether; // Non-round number
 
-        uint256 vaultSharesBefore = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultSharesBefore = autoPoolVault.balanceOf(address(vault));
         _withdraw(client1, withdrawAmount, recipient1);
-        uint256 vaultSharesAfter = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultSharesAfter = autoPoolVault.balanceOf(address(vault));
 
         // The shares burned from autoDOLA vault should match internal calculation
         uint256 totalStakedShares = mainRewarder.balanceOf(address(vault));
@@ -315,13 +301,13 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         // Get vault state before withdrawal
         uint256 totalSharesInMainRewarder = mainRewarder.balanceOf(address(vault));
-        uint256 totalSharesInVaultBefore = autoDolaVault.balanceOf(address(vault));
+        uint256 totalSharesInVaultBefore = autoPoolVault.balanceOf(address(vault));
 
         _withdraw(client1, withdrawAmount, recipient1);
 
         // Check if vault and mainRewarder share counts are in sync
         uint256 totalSharesInMainRewarderAfter = mainRewarder.balanceOf(address(vault));
-        uint256 totalSharesInVaultAfter = autoDolaVault.balanceOf(address(vault));
+        uint256 totalSharesInVaultAfter = autoPoolVault.balanceOf(address(vault));
 
         // CRITICAL: These should be exactly equal
         // Any discrepancy indicates leftoverShares calculation error
@@ -348,12 +334,12 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         // Withdraw amount that causes precision loss
         uint256 withdrawAmount = 333333333333333333; // ~0.333 ether
 
-        uint256 vaultSharesBefore = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultSharesBefore = autoPoolVault.balanceOf(address(vault));
         uint256 stakedSharesBefore = mainRewarder.balanceOf(address(vault));
 
         _withdraw(client1, withdrawAmount, recipient1);
 
-        uint256 vaultSharesAfter = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultSharesAfter = autoPoolVault.balanceOf(address(vault));
         uint256 stakedSharesAfter = mainRewarder.balanceOf(address(vault));
 
         // Even with rounding, vault and staked shares must be exactly equal
@@ -386,14 +372,14 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _withdraw(client1, 3000 ether, recipient1);
 
         // Check consistency
-        uint256 vaultSharesAfterFirst = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultSharesAfterFirst = autoPoolVault.balanceOf(address(vault));
         uint256 stakedSharesAfterFirst = mainRewarder.balanceOf(address(vault));
         assertEq(vaultSharesAfterFirst, stakedSharesAfterFirst, "Mismatch after first user withdrawal");
 
         _withdraw(client2, 5000 ether, recipient2);
 
         // Check consistency again
-        uint256 vaultSharesAfterSecond = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultSharesAfterSecond = autoPoolVault.balanceOf(address(vault));
         uint256 stakedSharesAfterSecond = mainRewarder.balanceOf(address(vault));
         assertEq(vaultSharesAfterSecond, stakedSharesAfterSecond, "Mismatch after second user withdrawal");
     }
@@ -419,7 +405,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _withdraw(client1, withdrawAmount, recipient1);
 
         // Vault and staked shares should still match exactly
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultShares = autoPoolVault.balanceOf(address(vault));
         uint256 stakedShares = mainRewarder.balanceOf(address(vault));
         assertEq(vaultShares, stakedShares, "Dust amounts should not cause share mismatch");
     }
@@ -441,7 +427,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         assertEq(received, withdrawAmount, "Should receive dust amount");
 
         // Shares should still be consistent
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultShares = autoPoolVault.balanceOf(address(vault));
         uint256 stakedShares = mainRewarder.balanceOf(address(vault));
         assertEq(vaultShares, stakedShares, "Dust withdrawal should not break share accounting");
     }
@@ -464,7 +450,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _withdraw(client1, withdrawAmount, recipient1);
 
         // Vault and staked shares must match
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultShares = autoPoolVault.balanceOf(address(vault));
         uint256 stakedShares = mainRewarder.balanceOf(address(vault));
         assertEq(vaultShares, stakedShares, "Fractional calculations should not break share accounting");
     }
@@ -489,7 +475,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         }
 
         // After many operations, shares should still match
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultShares = autoPoolVault.balanceOf(address(vault));
         uint256 stakedShares = mainRewarder.balanceOf(address(vault));
         assertEq(vaultShares, stakedShares, "Precision loss should not accumulate across operations");
     }
@@ -508,7 +494,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _deposit(client1, largeAmount, recipient1);
 
         // Verify balance
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), largeAmount, "Large deposit balance");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), largeAmount, "Large deposit balance");
 
         // Withdraw half
         uint256 withdrawAmount = 500000000 ether;
@@ -516,7 +502,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         assertEq(received, withdrawAmount, "Should receive exact amount for large withdrawal");
         assertEq(
-            vault.balanceOf(address(dolaToken), recipient1),
+            vault.balanceOf(address(underlyingToken), recipient1),
             largeAmount - withdrawAmount,
             "Large amount accounting should be accurate"
         );
@@ -542,7 +528,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         // Should be able to withdraw remaining principal
         uint256 remaining = preciseAmount - preciseWithdraw;
         _withdraw(client1, remaining, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 0, "Should fully withdraw precise amount");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 0, "Should fully withdraw precise amount");
     }
 
     /**
@@ -556,7 +542,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _deposit(client1, 300000 ether, recipient1);
 
         uint256 totalDeposited = 600000 ether;
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), totalDeposited, "Total deposited");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), totalDeposited, "Total deposited");
 
         // Large yield events
         _simulateYield(50000 ether);
@@ -567,13 +553,13 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _withdraw(client1, 200000 ether, recipient1);
 
         assertEq(
-            vault.balanceOf(address(dolaToken), recipient1),
+            vault.balanceOf(address(underlyingToken), recipient1),
             250000 ether,
             "Balance should be accurate after multiple large operations"
         );
 
         // Shares should still match
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultShares = autoPoolVault.balanceOf(address(vault));
         uint256 stakedShares = mainRewarder.balanceOf(address(vault));
         assertEq(vaultShares, stakedShares, "Large operations should not break share accounting");
     }
@@ -597,7 +583,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         assertEq(received, halfAmount, "Should receive half amount");
         assertEq(
-            vault.balanceOf(address(dolaToken), recipient1), halfAmount, "Remaining balance should be exactly half"
+            vault.balanceOf(address(underlyingToken), recipient1), halfAmount, "Remaining balance should be exactly half"
         );
     }
 
@@ -617,14 +603,14 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
             _withdraw(client1, tenPercent, recipient1);
             uint256 expectedRemaining = depositAmount - (tenPercent * (i + 1));
             assertEq(
-                vault.balanceOf(address(dolaToken), recipient1),
+                vault.balanceOf(address(underlyingToken), recipient1),
                 expectedRemaining,
                 "Balance should decrease by 10% each time"
             );
         }
 
         // Final balance should be 50%
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 5000 ether, "Final balance should be 50%");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 5000 ether, "Final balance should be 50%");
     }
 
     /**
@@ -638,22 +624,22 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         // First partial withdrawal
         _withdraw(client1, 2000 ether, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 6000 ether, "After first withdrawal");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 6000 ether, "After first withdrawal");
 
         // Yield accrues
         _simulateYield(500 ether);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 6000 ether, "Yield should not change user balance");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 6000 ether, "Yield should not change user balance");
 
         // Second partial withdrawal
         _withdraw(client1, 3000 ether, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 3000 ether, "After second withdrawal");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 3000 ether, "After second withdrawal");
 
         // More yield
         _simulateYield(300 ether);
 
         // Final withdrawal
         _withdraw(client1, 3000 ether, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 0, "Final balance should be zero");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 0, "Final balance should be zero");
     }
 
     // ============================================
@@ -693,7 +679,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         assertTrue(stakedAfter > 0, "Should have re-staked shares");
 
         // Staked shares should match vault shares
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultShares = autoPoolVault.balanceOf(address(vault));
         assertEq(vaultShares, stakedAfter, "Re-staked shares should match vault balance");
     }
 
@@ -709,7 +695,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _simulateYield(800 ether);
 
         // Before withdrawal, all shares are staked
-        uint256 vaultSharesBefore = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultSharesBefore = autoPoolVault.balanceOf(address(vault));
         uint256 stakedSharesBefore = mainRewarder.balanceOf(address(vault));
         assertEq(vaultSharesBefore, stakedSharesBefore, "Pre-withdrawal: vault and staked match");
 
@@ -717,7 +703,7 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _withdraw(client1, 3000 ether, recipient1);
 
         // After withdrawal, all shares should still be staked (including leftovers)
-        uint256 vaultSharesAfter = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultSharesAfter = autoPoolVault.balanceOf(address(vault));
         uint256 stakedSharesAfter = mainRewarder.balanceOf(address(vault));
         assertEq(vaultSharesAfter, stakedSharesAfter, "Post-withdrawal: vault and staked match (atomic re-stake)");
     }
@@ -740,22 +726,22 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         // First cycle
         _deposit(client1, 5000 ether, recipient1);
         _withdraw(client1, 3000 ether, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 2000 ether, "After cycle 1");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 2000 ether, "After cycle 1");
 
         // Second cycle
         _deposit(client1, 4000 ether, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 6000 ether, "After cycle 2 deposit");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 6000 ether, "After cycle 2 deposit");
         _withdraw(client1, 2000 ether, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 4000 ether, "After cycle 2");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 4000 ether, "After cycle 2");
 
         // Third cycle
         _deposit(client1, 3000 ether, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 7000 ether, "After cycle 3 deposit");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 7000 ether, "After cycle 3 deposit");
         _withdraw(client1, 5000 ether, recipient1);
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 2000 ether, "After cycle 3");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 2000 ether, "After cycle 3");
 
         // Shares should still be consistent
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultShares = autoPoolVault.balanceOf(address(vault));
         uint256 stakedShares = mainRewarder.balanceOf(address(vault));
         assertEq(vaultShares, stakedShares, "Multiple cycles should not break share accounting");
     }
@@ -774,8 +760,8 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _withdraw(client2, 2000 ether, recipient2);
 
         // Verify balances are independent
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 3000 ether, "User 1 balance");
-        assertEq(vault.balanceOf(address(dolaToken), recipient2), 4000 ether, "User 2 balance");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 3000 ether, "User 1 balance");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient2), 4000 ether, "User 2 balance");
 
         // User 1: Second cycle
         _deposit(client1, 2000 ether, recipient1);
@@ -786,11 +772,11 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         _withdraw(client2, 5000 ether, recipient2);
 
         // Verify final balances
-        assertEq(vault.balanceOf(address(dolaToken), recipient1), 1000 ether, "User 1 final balance");
-        assertEq(vault.balanceOf(address(dolaToken), recipient2), 2000 ether, "User 2 final balance");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 1000 ether, "User 1 final balance");
+        assertEq(vault.balanceOf(address(underlyingToken), recipient2), 2000 ether, "User 2 final balance");
 
         // Shares should be consistent
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultShares = autoPoolVault.balanceOf(address(vault));
         uint256 stakedShares = mainRewarder.balanceOf(address(vault));
         assertEq(vaultShares, stakedShares, "Multi-user cycles should not break share accounting");
     }
@@ -822,13 +808,13 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
         }
 
         assertEq(
-            vault.balanceOf(address(dolaToken), recipient1),
+            vault.balanceOf(address(underlyingToken), recipient1),
             expectedBalance,
             "Balance should be accurate after many cycles"
         );
 
         // Shares should be consistent
-        uint256 vaultShares = autoDolaVault.balanceOf(address(vault));
+        uint256 vaultShares = autoPoolVault.balanceOf(address(vault));
         uint256 stakedShares = mainRewarder.balanceOf(address(vault));
         assertEq(vaultShares, stakedShares, "Many cycles should not break share accounting");
     }

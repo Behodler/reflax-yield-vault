@@ -3,22 +3,22 @@ pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
 import "../src/SurplusTracker.sol";
-import "../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "../src/mocks/MockAutoDOLA.sol";
+import "./mocks/MockAutoPool.sol";
 import "../src/mocks/MockMainRewarder.sol";
 
 /**
  * @title SurplusTrackerTest
  * @notice Comprehensive unit tests for SurplusTracker contract
- * @dev Uses AutoDolaYieldStrategy (real implementation) with mocked external dependencies
+ * @dev Uses AutoPoolYieldStrategy (real implementation) with mocked external dependencies
  */
 contract SurplusTrackerTest is Test {
     SurplusTracker public tracker;
-    AutoDolaYieldStrategy public vault;
+    AutoPoolYieldStrategy public vault;
     MockERC20 public token;
     MockERC20 public tokeToken;
-    MockAutoDOLA public autoDolaVault;
+    MockAutoPool public autoPoolVault;
     MockMainRewarder public mainRewarder;
 
     address public owner;
@@ -39,19 +39,19 @@ contract SurplusTrackerTest is Test {
 
         // Deploy mock external dependencies
         mainRewarder = new MockMainRewarder(address(tokeToken));
-        autoDolaVault = new MockAutoDOLA(address(token), address(mainRewarder));
+        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(token), address(mainRewarder));
 
-        // Deploy the real AutoDolaYieldStrategy
-        vault = new AutoDolaYieldStrategy(
-            owner, address(token), address(tokeToken), address(autoDolaVault), address(mainRewarder)
+        // Deploy the real AutoPoolYieldStrategy
+        vault = new AutoPoolYieldStrategy(
+            owner, address(token), address(tokeToken), address(autoPoolVault), address(mainRewarder)
         );
 
         // Authorize client for vault operations
         vault.setClient(client, true);
 
-        // Mint tokens to client and autoDolaVault for testing
+        // Mint tokens to client and autoPoolVault for testing
         token.mint(client, 10000e18);
-        token.mint(address(autoDolaVault), 10000e18); // For autoDOLA mock
+        token.mint(address(autoPoolVault), 10000e18); // For autoPool mock
     }
 
     // ============ BASIC FUNCTIONALITY TESTS ============
@@ -176,7 +176,7 @@ contract SurplusTrackerTest is Test {
         // Note: Using type(uint256).max / 2 causes overflow in ERC4626 share conversion
         uint256 largeAmount = 1_000_000_000_000e18; // 1 trillion tokens
         token.mint(client, largeAmount);
-        token.mint(address(autoDolaVault), largeAmount); // For autoDOLA mock
+        token.mint(address(autoPoolVault), largeAmount); // For autoPool mock
 
         vm.startPrank(client);
         token.approve(address(vault), largeAmount);

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.13;
 
-import "../AYieldStrategy.sol";
-import "../imports/IAutoDOLA.sol";
-import "../imports/IMainRewarder.sol";
+import "../../../AYieldStrategy.sol";
+import "../../../imports/Legacy/IAutoDOLA.sol";
+import "../../../imports/IMainRewarder.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 

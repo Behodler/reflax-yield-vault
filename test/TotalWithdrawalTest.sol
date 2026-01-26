@@ -2,9 +2,9 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "../src/mocks/MockAutoDOLA.sol";
+import "./mocks/MockAutoPool.sol";
 import "../src/mocks/MockMainRewarder.sol";
 
 /**
@@ -12,10 +12,10 @@ import "../src/mocks/MockMainRewarder.sol";
  * @notice Comprehensive tests for the two-phase totalWithdrawal function
  */
 contract TotalWithdrawalTest is Test {
-    AutoDolaYieldStrategy public vault;
+    AutoPoolYieldStrategy public vault;
     MockERC20 public depositToken;
     MockERC20 public tokeToken;
-    MockAutoDOLA public autoDolaVault;
+    MockAutoPool public autoPoolVault;
     MockMainRewarder public mainRewarder;
 
     address public owner = address(1);
@@ -41,11 +41,11 @@ contract TotalWithdrawalTest is Test {
 
         // Deploy mock external dependencies
         mainRewarder = new MockMainRewarder(address(tokeToken));
-        autoDolaVault = new MockAutoDOLA(address(depositToken), address(mainRewarder));
+        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(depositToken), address(mainRewarder));
 
-        // Deploy the real AutoDolaYieldStrategy
-        vault = new AutoDolaYieldStrategy(
-            owner, address(depositToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
+        // Deploy the real AutoPoolYieldStrategy
+        vault = new AutoPoolYieldStrategy(
+            owner, address(depositToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
         );
 
         // Setup initial token balance and authorization
@@ -63,7 +63,7 @@ contract TotalWithdrawalTest is Test {
 
         // Verify initial setup
         assertEq(vault.balanceOf(address(depositToken), client), DEPOSIT_AMOUNT);
-        assertEq(depositToken.balanceOf(address(autoDolaVault)), DEPOSIT_AMOUNT);
+        assertEq(depositToken.balanceOf(address(autoPoolVault)), DEPOSIT_AMOUNT);
     }
 
     // ============ ACCESS CONTROL TESTS ============

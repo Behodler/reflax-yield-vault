@@ -2,9 +2,9 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteYieldStrategies/AutoDolaYieldStrategy.sol";
+import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "../src/mocks/MockAutoDOLA.sol";
+import "./mocks/MockAutoPool.sol";
 import "../src/mocks/MockMainRewarder.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
@@ -15,10 +15,10 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 contract VaultWithdrawerTest is Test {
     using SafeERC20 for IERC20;
 
-    AutoDolaYieldStrategy public vault;
+    AutoPoolYieldStrategy public vault;
     MockERC20 public depositToken;
     MockERC20 public tokeToken;
-    MockAutoDOLA public autoDolaVault;
+    MockAutoPool public autoPoolVault;
     MockMainRewarder public mainRewarder;
 
     address public owner;
@@ -45,19 +45,19 @@ contract VaultWithdrawerTest is Test {
 
         // Deploy mock external dependencies
         mainRewarder = new MockMainRewarder(address(tokeToken));
-        autoDolaVault = new MockAutoDOLA(address(depositToken), address(mainRewarder));
+        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(depositToken), address(mainRewarder));
 
-        // Deploy the real AutoDolaYieldStrategy
-        vault = new AutoDolaYieldStrategy(
-            owner, address(depositToken), address(tokeToken), address(autoDolaVault), address(mainRewarder)
+        // Deploy the real AutoPoolYieldStrategy
+        vault = new AutoPoolYieldStrategy(
+            owner, address(depositToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
         );
 
         // Authorize client for vault operations
         vault.setClient(client, true);
 
-        // Mint tokens to client and autoDolaVault for testing
+        // Mint tokens to client and autoPoolVault for testing
         depositToken.mint(client, 10000000e18);
-        depositToken.mint(address(autoDolaVault), 10000000e18);
+        depositToken.mint(address(autoPoolVault), 10000000e18);
     }
 
     /**
@@ -79,8 +79,8 @@ contract VaultWithdrawerTest is Test {
         vm.stopPrank();
 
         if (surplus > 0) {
-            depositToken.mint(address(autoDolaVault), surplus);
-            autoDolaVault.simulateYield(surplus);
+            depositToken.mint(address(autoPoolVault), surplus);
+            autoPoolVault.simulateYield(surplus);
         }
     }
 
