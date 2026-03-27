@@ -67,12 +67,12 @@ contract MyTest is Test {
 }
 ```
 
-#### Setting Up Principal and Surplus
+#### Setting Up Principal and Yield
 
 Use this helper function to create test scenarios with both principal and yield:
 
 ```solidity
-function setupPrincipalAndSurplus(uint256 principalAmount, uint256 surplusAmount) internal {
+function setupPrincipalAndYield(uint256 principalAmount, uint256 yieldAmount) internal {
     // Deposit principal
     vm.startPrank(client);
     token.approve(address(vault), principalAmount);
@@ -80,9 +80,9 @@ function setupPrincipalAndSurplus(uint256 principalAmount, uint256 surplusAmount
     vm.stopPrank();
 
     // Simulate yield by updating the mock's accounting AND providing tokens
-    if (surplusAmount > 0) {
-        token.mint(address(autoDolaVault), surplusAmount); // Mint tokens for payout
-        autoDolaVault.simulateYield(surplusAmount); // Update internal accounting
+    if (yieldAmount > 0) {
+        token.mint(address(autoDolaVault), yieldAmount); // Mint tokens for payout
+        autoDolaVault.simulateYield(yieldAmount); // Update internal accounting
     }
 }
 ```
@@ -92,7 +92,7 @@ function setupPrincipalAndSurplus(uint256 principalAmount, uint256 surplusAmount
 ```solidity
 function testWithdrawWithYield() public {
     // Setup: 1000 principal + 100 yield
-    setupPrincipalAndSurplus(1000e18, 100e18);
+    setupPrincipalAndYield(1000e18, 100e18);
 
     // Verify state
     assertEq(vault.principalOf(address(token), client), 1000e18);
@@ -134,9 +134,7 @@ function testWithdrawWithYield() public {
 
 See these files for complete examples of the pattern:
 
-- `/home/justin/code/product-owner/worktrees/vault-RM/clean-code-bug-fix/test/SurplusWithdrawer.t.sol`
-- `/home/justin/code/product-owner/worktrees/vault-RM/clean-code-bug-fix/test/VaultWithdrawer.t.sol`
-- `/home/justin/code/product-owner/worktrees/vault-RM/clean-code-bug-fix/test/integration/SurplusTrackerIntegration.t.sol`
+- `test/AutoDolaYieldStrategy.t.sol`
 
 ### Migration Guide
 
@@ -144,7 +142,7 @@ If you're updating old tests that used MockVault:
 
 1. Replace `import MockVault` with AutoDolaYieldStrategy + mocks
 2. Update setUp() to deploy AutoDolaYieldStrategy with mock externals
-3. Add `setupPrincipalAndSurplus` helper
+3. Add `setupPrincipalAndYield` helper
 4. Replace any `setPrincipal` calls with the helper
 5. Remove tests that use arbitrary tokens (AutoDolaYieldStrategy is token-specific)
 6. Update withdrawal tests to use same address for recipient as balance owner
