@@ -141,7 +141,9 @@ contract AutoPoolYieldStrategyUnitTest is Test {
 
         // With no yield, totalBalanceOf should equal principalOf
         assertEq(vault.totalBalanceOf(address(underlyingToken), user1), depositAmount);
-        assertEq(vault.totalBalanceOf(address(underlyingToken), user1), vault.principalOf(address(underlyingToken), user1));
+        assertEq(
+            vault.totalBalanceOf(address(underlyingToken), user1), vault.principalOf(address(underlyingToken), user1)
+        );
     }
 
     function testTotalBalanceOfWithYield() public {
@@ -318,7 +320,9 @@ contract AutoPoolYieldStrategyUnitTest is Test {
         // balanceOf should return principal, not total (backward compatibility)
         assertEq(vault.balanceOf(address(underlyingToken), user1), depositAmount);
         assertEq(vault.balanceOf(address(underlyingToken), user1), vault.principalOf(address(underlyingToken), user1));
-        assertLt(vault.balanceOf(address(underlyingToken), user1), vault.totalBalanceOf(address(underlyingToken), user1));
+        assertLt(
+            vault.balanceOf(address(underlyingToken), user1), vault.totalBalanceOf(address(underlyingToken), user1)
+        );
     }
 
     function testBalanceOfBackwardCompatibilityMultipleUsers() public {
@@ -484,7 +488,9 @@ contract AutoPoolYieldStrategyUnitTest is Test {
             "Principal changed during surplus withdrawal!"
         );
         assertEq(
-            vault.principalOf(address(underlyingToken), client), depositAmount, "Principal does not match original deposit!"
+            vault.principalOf(address(underlyingToken), client),
+            depositAmount,
+            "Principal does not match original deposit!"
         );
 
         // Total balance should decrease by withdrawal amount

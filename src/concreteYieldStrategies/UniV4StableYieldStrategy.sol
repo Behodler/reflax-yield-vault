@@ -238,8 +238,7 @@ contract UniV4StableYieldStrategy is AYieldStrategy {
      * @return pairedTokenFees Uncollected fees in paired token
      */
     function pendingYield() external view returns (uint256 depositTokenFees, uint256 pairedTokenFees) {
-        (uint128 liquidity,,) =
-            poolManager.getPosition(poolId, address(this), tickLower, tickUpper, POSITION_SALT);
+        (uint128 liquidity,,) = poolManager.getPosition(poolId, address(this), tickLower, tickUpper, POSITION_SALT);
 
         if (liquidity == 0) {
             return (0, 0);
@@ -575,10 +574,7 @@ contract UniV4StableYieldStrategy is AYieldStrategy {
         uint256 liquidityAmount = normalizedDeposit < normalizedPaired ? normalizedDeposit : normalizedPaired;
 
         IPoolManager.ModifyLiquidityParams memory params = IPoolManager.ModifyLiquidityParams({
-            tickLower: tickLower,
-            tickUpper: tickUpper,
-            liquidityDelta: int256(liquidityAmount),
-            salt: POSITION_SALT
+            tickLower: tickLower, tickUpper: tickUpper, liquidityDelta: int256(liquidityAmount), salt: POSITION_SALT
         });
 
         poolManager.modifyLiquidity(poolKey, params, "");
@@ -605,10 +601,7 @@ contract UniV4StableYieldStrategy is AYieldStrategy {
         if (liquidity == 0) return (0, 0);
 
         IPoolManager.ModifyLiquidityParams memory params = IPoolManager.ModifyLiquidityParams({
-            tickLower: tickLower,
-            tickUpper: tickUpper,
-            liquidityDelta: -int256(int128(liquidity)),
-            salt: POSITION_SALT
+            tickLower: tickLower, tickUpper: tickUpper, liquidityDelta: -int256(int128(liquidity)), salt: POSITION_SALT
         });
 
         IPoolManager.BalanceDelta memory delta = poolManager.modifyLiquidity(poolKey, params, "");

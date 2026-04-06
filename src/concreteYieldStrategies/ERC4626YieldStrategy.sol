@@ -53,7 +53,11 @@ contract ERC4626YieldStrategy is AYieldStrategy {
      * @param sharesReceived The amount of vault shares received
      */
     event Deposited(
-        address indexed token, address indexed depositor, address indexed recipient, uint256 amount, uint256 sharesReceived
+        address indexed token,
+        address indexed depositor,
+        address indexed recipient,
+        uint256 amount,
+        uint256 sharesReceived
     );
 
     /**
@@ -65,7 +69,11 @@ contract ERC4626YieldStrategy is AYieldStrategy {
      * @param sharesBurned The amount of vault shares burned
      */
     event Withdrawn(
-        address indexed token, address indexed withdrawer, address indexed recipient, uint256 amount, uint256 sharesBurned
+        address indexed token,
+        address indexed withdrawer,
+        address indexed recipient,
+        uint256 amount,
+        uint256 sharesBurned
     );
 
     // ============ CONSTRUCTOR ============

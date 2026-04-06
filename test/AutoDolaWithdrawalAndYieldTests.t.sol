@@ -109,7 +109,9 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         // Should receive exactly principal
         assertEq(received, depositAmount, "User should receive exact principal with no yield");
-        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 0, "Balance should be zero after full withdrawal");
+        assertEq(
+            vault.balanceOf(address(underlyingToken), recipient1), 0, "Balance should be zero after full withdrawal"
+        );
     }
 
     /**
@@ -583,7 +585,9 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         assertEq(received, halfAmount, "Should receive half amount");
         assertEq(
-            vault.balanceOf(address(underlyingToken), recipient1), halfAmount, "Remaining balance should be exactly half"
+            vault.balanceOf(address(underlyingToken), recipient1),
+            halfAmount,
+            "Remaining balance should be exactly half"
         );
     }
 
@@ -628,7 +632,9 @@ contract AutoDolaWithdrawalAndYieldTests is Test {
 
         // Yield accrues
         _simulateYield(500 ether);
-        assertEq(vault.balanceOf(address(underlyingToken), recipient1), 6000 ether, "Yield should not change user balance");
+        assertEq(
+            vault.balanceOf(address(underlyingToken), recipient1), 6000 ether, "Yield should not change user balance"
+        );
 
         // Second partial withdrawal
         _withdraw(client1, 3000 ether, recipient1);

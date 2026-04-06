@@ -50,12 +50,7 @@ contract MockV4PoolManager is IPoolManager {
 
     // Events for testing
     event LiquidityModified(
-        address indexed owner,
-        int24 tickLower,
-        int24 tickUpper,
-        int256 liquidityDelta,
-        int128 amount0,
-        int128 amount1
+        address indexed owner, int24 tickLower, int24 tickUpper, int256 liquidityDelta, int128 amount0, int128 amount1
     );
     event Swapped(bool zeroForOne, int256 amountSpecified, int128 amount0, int128 amount1);
     event FeesCollected(address indexed owner, uint256 amount0, uint256 amount1);

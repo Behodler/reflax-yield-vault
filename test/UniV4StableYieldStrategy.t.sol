@@ -40,12 +40,8 @@ contract UniV4StableYieldStrategyTest is Test {
         pairedToken = new MockERC20("USDT", "USDT", pairedDecimals);
 
         // Deploy mock pool manager
-        poolManager = new MockV4PoolManager(
-            address(depositToken),
-            address(pairedToken),
-            depositDecimals,
-            pairedDecimals
-        );
+        poolManager =
+            new MockV4PoolManager(address(depositToken), address(pairedToken), depositDecimals, pairedDecimals);
 
         // Create pool key
         PoolKey memory poolKey = PoolKey({
@@ -104,11 +100,7 @@ contract UniV4StableYieldStrategyTest is Test {
 
     function testConstructorRevertsZeroDepositToken() public {
         PoolKey memory poolKey = PoolKey({
-            currency0: address(0),
-            currency1: address(pairedToken),
-            fee: 500,
-            tickSpacing: 10,
-            hooks: address(0)
+            currency0: address(0), currency1: address(pairedToken), fee: 500, tickSpacing: 10, hooks: address(0)
         });
 
         vm.expectRevert("UniV4StableYieldStrategy: deposit token cannot be zero address");
@@ -284,14 +276,7 @@ contract UniV4StableYieldStrategyTest is Test {
         // Simulate fees
         uint128 fees0 = 50e18;
         uint128 fees1 = 50e18;
-        poolManager.simulateFees(
-            address(strategy),
-            TICK_LOWER,
-            TICK_UPPER,
-            bytes32(0),
-            fees0,
-            fees1
-        );
+        poolManager.simulateFees(address(strategy), TICK_LOWER, TICK_UPPER, bytes32(0), fees0, fees1);
 
         // Fund pool manager with tokens to pay out fees
         depositToken.mint(address(poolManager), fees0);
@@ -391,13 +376,7 @@ contract UniV4StableYieldStrategyTest is Test {
 
     function testSetSlippageToleranceRevertsIfTooHigh() public {
         vm.prank(owner);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                UniV4StableYieldStrategy.SlippageToleranceTooHigh.selector,
-                150,
-                100
-            )
-        );
+        vm.expectRevert(abi.encodeWithSelector(UniV4StableYieldStrategy.SlippageToleranceTooHigh.selector, 150, 100));
         strategy.setSlippageTolerance(150); // > 1%
     }
 
@@ -462,10 +441,7 @@ contract UniV4StableYieldStrategyTest is Test {
         strategy.deposit(address(depositToken), depositAmount, user1);
         vm.stopPrank();
 
-        assertEq(
-            strategy.balanceOf(address(depositToken), user1),
-            strategy.principalOf(address(depositToken), user1)
-        );
+        assertEq(strategy.balanceOf(address(depositToken), user1), strategy.principalOf(address(depositToken), user1));
     }
 
     // ============ ACCESS CONTROL TESTS ============
@@ -604,7 +580,7 @@ contract UniV4StableYieldStrategyTest is Test {
         strategy.totalWithdrawal(address(depositToken), client);
 
         // Check withdrawal state
-        (uint256 initiatedAt, , ) = strategy.withdrawalStates(address(depositToken), client);
+        (uint256 initiatedAt,,) = strategy.withdrawalStates(address(depositToken), client);
         assertGt(initiatedAt, 0);
     }
 
@@ -684,14 +660,7 @@ contract UniV4StableYieldStrategyTest is Test {
         strategy.setWithdrawer(withdrawer, true);
 
         // Simulate fees for surplus
-        poolManager.simulateFees(
-            address(strategy),
-            TICK_LOWER,
-            TICK_UPPER,
-            bytes32(0),
-            100e18,
-            0
-        );
+        poolManager.simulateFees(address(strategy), TICK_LOWER, TICK_UPPER, bytes32(0), 100e18, 0);
         depositToken.mint(address(poolManager), 100e18);
 
         // The surplus extraction would only work if we had actual yield

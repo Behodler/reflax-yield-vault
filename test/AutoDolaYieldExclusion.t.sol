@@ -312,7 +312,9 @@ contract AutoDolaYieldExclusionTest is Test {
 
         // Total deposited should only be user2's principal now
         assertEq(
-            vault.getTotalDeposited(address(underlyingToken)), deposit2, "totalDeposited reflects only remaining principal"
+            vault.getTotalDeposited(address(underlyingToken)),
+            deposit2,
+            "totalDeposited reflects only remaining principal"
         );
 
         // Yield shares should still be in the vault

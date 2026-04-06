@@ -60,13 +60,19 @@ contract AutoPoolVaultTest is Test {
         new AutoPoolYieldStrategy(owner, address(0), address(tokeToken), address(autoPoolVault), address(mainRewarder));
 
         vm.expectRevert("AutoPoolYieldStrategy: TOKE token cannot be zero address");
-        new AutoPoolYieldStrategy(owner, address(underlyingToken), address(0), address(autoPoolVault), address(mainRewarder));
+        new AutoPoolYieldStrategy(
+            owner, address(underlyingToken), address(0), address(autoPoolVault), address(mainRewarder)
+        );
 
         vm.expectRevert("AutoPoolYieldStrategy: autopool vault cannot be zero address");
-        new AutoPoolYieldStrategy(owner, address(underlyingToken), address(tokeToken), address(0), address(mainRewarder));
+        new AutoPoolYieldStrategy(
+            owner, address(underlyingToken), address(tokeToken), address(0), address(mainRewarder)
+        );
 
         vm.expectRevert("AutoPoolYieldStrategy: MainRewarder cannot be zero address");
-        new AutoPoolYieldStrategy(owner, address(underlyingToken), address(tokeToken), address(autoPoolVault), address(0));
+        new AutoPoolYieldStrategy(
+            owner, address(underlyingToken), address(tokeToken), address(autoPoolVault), address(0)
+        );
 
         // Test successful construction
         assertTrue(address(vault.underlyingToken()) == address(underlyingToken));
@@ -663,7 +669,9 @@ contract AutoPoolVaultTest is Test {
 
         // Verify total withdrawal completed successfully
         assertEq(
-            vault.balanceOf(address(underlyingToken), user1), 0, "Total withdrawal should complete and zero user balance"
+            vault.balanceOf(address(underlyingToken), user1),
+            0,
+            "Total withdrawal should complete and zero user balance"
         );
     }
 

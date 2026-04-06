@@ -252,9 +252,7 @@ contract ERC4626YieldStrategyTest is Test {
         uint256 surplus = totalBalance - principal;
 
         // Attempt to withdraw more than surplus
-        vm.expectRevert(
-            "ERC4626YieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal"
-        );
+        vm.expectRevert("ERC4626YieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal");
         vm.prank(withdrawer);
         strategy.withdrawFrom(address(underlyingToken), client, surplus + 50e18, withdrawer);
     }
@@ -533,8 +531,7 @@ contract ERC4626YieldStrategyTest is Test {
 
         // balanceOf should return principal, not total
         assertEq(
-            strategy.balanceOf(address(underlyingToken), user1),
-            strategy.principalOf(address(underlyingToken), user1)
+            strategy.balanceOf(address(underlyingToken), user1), strategy.principalOf(address(underlyingToken), user1)
         );
         assertEq(strategy.balanceOf(address(underlyingToken), user1), depositAmount);
         assertLt(
@@ -607,9 +604,7 @@ contract ERC4626YieldStrategyTest is Test {
         strategy.deposit(address(underlyingToken), depositAmount, client);
 
         // No yield generated
-        vm.expectRevert(
-            "ERC4626YieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal"
-        );
+        vm.expectRevert("ERC4626YieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal");
         vm.prank(withdrawer);
         strategy.withdrawFrom(address(underlyingToken), client, 1e18, withdrawer);
     }
