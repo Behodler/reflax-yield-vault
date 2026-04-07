@@ -25,7 +25,7 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
 
     // Curve mocks
     MockCurveStableSwapNGPool pool1; // USDe/crvUSD (coin0 = USDe, coin1 = crvUSD)
-    MockCurveStableSwapNGPool pool2; // sUSDe/crvUSD (coin0 = sUSDe, coin1 = crvUSD)
+    MockCurveStableSwapNGPool pool2; // sUSDe/crvUSD (coin0 = crvUSD, coin1 = sUSDe) — verified via mainnet cast call
     MockCurveRouterNGRouted router;
 
     // Real contracts under test
@@ -59,7 +59,7 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
 
     function _deployPoolsAndRouter() internal {
         pool1 = new MockCurveStableSwapNGPool(address(usde), address(crvUSD));
-        pool2 = new MockCurveStableSwapNGPool(address(sUSDe), address(crvUSD));
+        pool2 = new MockCurveStableSwapNGPool(address(crvUSD), address(sUSDe));
         router = new MockCurveRouterNGRouted();
     }
 
@@ -83,8 +83,10 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
         fwdPath[4] = address(sUSDe);
 
         uint256[5][5] memory fwdParams;
+        // Hop 1 (pool1): USDe(coin0) -> crvUSD(coin1)
         fwdParams[0] = [uint256(0), 1, 1, 10, 2];
-        fwdParams[1] = [uint256(1), 0, 1, 10, 2];
+        // Hop 2 (pool2): crvUSD(coin0) -> sUSDe(coin1)
+        fwdParams[1] = [uint256(0), 1, 1, 10, 2];
 
         address[5] memory emptyPools;
 
@@ -97,7 +99,9 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
         revPath[4] = address(usde);
 
         uint256[5][5] memory revParams;
-        revParams[0] = [uint256(0), 1, 1, 10, 2];
+        // Hop 1 (pool2): sUSDe(coin1) -> crvUSD(coin0)
+        revParams[0] = [uint256(1), 0, 1, 10, 2];
+        // Hop 2 (pool1): crvUSD(coin1) -> USDe(coin0)
         revParams[1] = [uint256(1), 0, 1, 10, 2];
 
         vm.startPrank(owner);
@@ -264,7 +268,7 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
 
         uint256[5][5] memory fwdParams;
         fwdParams[0] = [uint256(0), 1, 1, 10, 2];
-        fwdParams[1] = [uint256(1), 0, 1, 10, 2];
+        fwdParams[1] = [uint256(0), 1, 1, 10, 2];
 
         address[5] memory emptyPools;
         freshAdapter.setRoute(address(usde), address(sUSDe), fwdPath, fwdParams, emptyPools);
@@ -287,7 +291,7 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
         revPath[4] = address(usde);
 
         uint256[5][5] memory revParams;
-        revParams[0] = [uint256(0), 1, 1, 10, 2];
+        revParams[0] = [uint256(1), 0, 1, 10, 2];
         revParams[1] = [uint256(1), 0, 1, 10, 2];
 
         vm.prank(owner);
@@ -302,10 +306,11 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
     // ============ Scenario 9: Coin index sanity check ============
 
     function testCoinIndicesMatchSeedData() public view {
+        // Verified against mainnet via cast call (pools 0xf55b...442 and 0x5706...e85)
         assertEq(pool1.coins(0), address(usde), "pool1 coin0 should be USDe");
         assertEq(pool1.coins(1), address(crvUSD), "pool1 coin1 should be crvUSD");
-        assertEq(pool2.coins(0), address(sUSDe), "pool2 coin0 should be sUSDe");
-        assertEq(pool2.coins(1), address(crvUSD), "pool2 coin1 should be crvUSD");
+        assertEq(pool2.coins(0), address(crvUSD), "pool2 coin0 should be crvUSD");
+        assertEq(pool2.coins(1), address(sUSDe), "pool2 coin1 should be sUSDe");
     }
 
     // ============ Scenario 10: Router walks 3-hop route ============
