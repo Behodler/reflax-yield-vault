@@ -197,3 +197,51 @@ Projects that reference vault-RM contracts will need to update their imports and
 - New: `import {IYieldStrategy} from "vault-RM/src/interfaces/IYieldStrategy.sol";`
 
 This naming convention eliminates ambiguity and makes the codebase more maintainable for both humans and AI agents.
+
+## AMM Route Configuration (AMMRoutes.json)
+
+`AMMRoutes.json` at the project root is a catalog of pre-configured AMM swap routes used by deployment scripts when wiring up concrete `IAMMAdapter` implementations for `ERC4626MarketYieldStrategy` (and future strategies that depend on AMM adapters).
+
+### Structure
+
+```json
+{
+  "<AMM_NAME>": {
+    "<VERSION>": {
+      "router": "<router_contract_address>",
+      "routes": {
+        "<TOKEN1-TOKEN2>": {
+          "<tokenName1>": "<address>",
+          "<tokenName2>": "<address>",
+          "route": ["...AMM-specific route data..."],
+          "<AMM-specific extras, e.g. swapParams, pools for Curve>": "..."
+        }
+      }
+    }
+  }
+}
+```
+
+- Top-level keys are AMM names (`Curve`, `Uniswap`, ...).
+- Second level identifies the version or router generation (`RouterNG` for Curve; `V2`/`V3`/`V4` for Uniswap).
+- Leaf entries describe one directional token pair: input and output token addresses plus the AMM-specific route payload.
+
+### How deployment scripts use it
+
+Future deployment scripts (not implemented as part of story 039) that deploy an `ERC4626MarketYieldStrategy` backed by a concrete AMM adapter (e.g. `CurveAMMAdapter`) will:
+
+1. Read the appropriate entry from `AMMRoutes.json`.
+2. Deploy the adapter with the `router` address from the file.
+3. Call `setRoute(tokenIn, tokenOut, ...)` on the adapter with the route data from the file.
+4. Deploy the strategy wired to that adapter.
+
+Example: an `ERC4626MarketYieldStrategy` for a market pool that deposits USDe and holds sUSDe will consume `Curve.RouterNG.routes["USDe-sUSDe"]` to configure its `CurveAMMAdapter`.
+
+### Adding new routes
+
+When adding routes for new AMMs or new pairs:
+
+- Verify all addresses against an authoritative source (Etherscan, the AMM's own UI).
+- For Curve, verify coin indices (`i`, `j`) by querying `coins(uint256)` on each pool.
+- Keep the leaf shape consistent: `tokenName1`, `tokenName2`, and `route` are required; AMM-specific fields (`swapParams`, `pools` for Curve) are added as siblings.
+- **Add both directions** if the strategy consuming this route needs to swap in both directions (all `ERC4626MarketYieldStrategy` deployments do — deposit goes one way, withdraw the other). Store `A-B` AND `B-A` as separate entries with independently pre-computed route payloads. The adapter does not reverse routes at runtime; this is deliberate, for gas efficiency, auditability, and to avoid pitfalls with meta-swaps or asymmetric swap types that don't reverse by a simple transformation.

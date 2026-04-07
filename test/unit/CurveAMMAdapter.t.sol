@@ -57,7 +57,11 @@ contract CurveAMMAdapterTest is Test {
 
     // ============ setRoute tests ============
 
-    function _makeSimplePath(address tokenIn, address pool, address tokenOut) internal pure returns (address[11] memory path) {
+    function _makeSimplePath(address tokenIn, address pool, address tokenOut)
+        internal
+        pure
+        returns (address[11] memory path)
+    {
         path[0] = tokenIn;
         path[1] = pool;
         path[2] = tokenOut;

@@ -131,7 +131,9 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
         assertGt(sUSDe.balanceOf(address(strategy)), 0, "strategy should hold sUSDe shares");
 
         uint256 totalBal = strategy.totalBalanceOf(address(usde), client);
-        assertApproxEqAbs(totalBal, depositAmount, depositAmount * 100 / 10000, "totalBalanceOf should match within slippage");
+        assertApproxEqAbs(
+            totalBal, depositAmount, depositAmount * 100 / 10000, "totalBalanceOf should match within slippage"
+        );
     }
 
     // ============ Scenario 2: Round-trip withdraw ============
@@ -150,7 +152,9 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
         assertEq(strategy.principalOf(address(usde), client), 0, "principal should be zero after full withdraw");
 
         uint256 usdeReceived = usde.balanceOf(client) - clientUsdeBefore;
-        assertApproxEqAbs(usdeReceived, depositAmount, depositAmount * 100 / 10000, "should receive deposit within slippage");
+        assertApproxEqAbs(
+            usdeReceived, depositAmount, depositAmount * 100 / 10000, "should receive deposit within slippage"
+        );
 
         // Strategy should hold only dust (rounding) at most
         assertLe(sUSDe.balanceOf(address(strategy)), 1, "strategy vault balance should be dust");

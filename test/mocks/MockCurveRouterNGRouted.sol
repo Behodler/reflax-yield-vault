@@ -97,9 +97,8 @@ contract MockCurveRouterNGRouted is ICurveRouterNG {
             require(_swap_params[k][3] == 10, "MockCurveRouterNGRouted: only pool_type=10 supported");
 
             IERC20(currentTokenIn).forceApprove(pool, dx);
-            dx = MockCurveStableSwapNGPool(pool).exchange(
-                int128(uint128(_swap_params[k][0])), int128(uint128(_swap_params[k][1])), dx, 0
-            );
+            dx = MockCurveStableSwapNGPool(pool)
+                .exchange(int128(uint128(_swap_params[k][0])), int128(uint128(_swap_params[k][1])), dx, 0);
 
             currentTokenIn = tokenOut;
             anyHopExecuted = true;
@@ -107,5 +106,4 @@ contract MockCurveRouterNGRouted is ICurveRouterNG {
 
         require(anyHopExecuted, "MockCurveRouterNGRouted: no hops executed");
     }
-
 }
