@@ -364,16 +364,16 @@ contract ERC4626YieldStrategy is AYieldStrategy {
     }
 
     /**
-     * @notice Internal withdrawFrom implementation for authorized surplus withdrawal
+     * @notice Internal skimSurplus implementation for authorized surplus extraction
      * @param token The token address (must be underlying token)
-     * @param client The client address whose balance to withdraw from
-     * @param amount The amount to withdraw (MUST be <= available surplus)
-     * @param recipient The address that will receive the withdrawn tokens
+     * @param client The client address whose surplus to skim
+     * @param amount The amount to skim (MUST be <= available surplus)
+     * @param recipient The address that will receive the skimmed tokens
      * @dev Allows authorized withdrawers to extract surplus (yield) without touching principal.
      *      CRITICAL: Principal tracking (clientBalances) is NEVER modified by this function.
-     *      Only surplus/yield can be withdrawn.
+     *      Only surplus/yield can be skimmed.
      */
-    function _withdrawFrom(address token, address client, uint256 amount, address recipient) internal override {
+    function _skimSurplus(address token, address client, uint256 amount, address recipient) internal override {
         require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
 
         // Get current balances
@@ -401,5 +401,37 @@ contract ERC4626YieldStrategy is AYieldStrategy {
         // clientBalances[token][client] stays unchanged
         // totalDeposited[token] stays unchanged
         // Only vault shares are reduced, affecting totalBalanceOf() but not principalOf()
+    }
+
+    /**
+     * @notice Batch skim the full available surplus of multiple clients in a single redeem
+     * @param token The token address (must be underlying token)
+     * @param clients The client addresses whose full available surplus is skimmed
+     * @param recipient The address that will receive all skimmed proceeds
+     * @dev Snapshots total value once, sums per-client FLOORED shares (protocol-favoring rounding),
+     *      and performs a SINGLE vault.redeem. Principal accounting is left untouched.
+     */
+    function _skimSurplusBatch(address token, address[] calldata clients, address recipient) internal override {
+        require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
+        uint256 td = totalDeposited[token];
+        if (td == 0) return;
+        uint256 totalValue = vault.convertToAssets(vault.balanceOf(address(this))); // snapshot
+        uint256 totalShares;
+        for (uint256 i = 0; i < clients.length; i++) {
+            address client = clients[i];
+            require(client != address(0), "ERC4626YieldStrategy: client cannot be zero address");
+            uint256 principal = clientBalances[token][client];
+            if (principal == 0) continue;
+            uint256 total = (totalValue * principal) / td; // == totalBalanceOf(client)
+            uint256 surplus = total > principal ? total - principal : 0;
+            if (surplus == 0) continue;
+            totalShares += vault.convertToShares(surplus); // per-client floor (protocol-favoring)
+            emit SurplusSkimmed(token, client, msg.sender, surplus, recipient);
+        }
+        if (totalShares == 0) return;
+        uint256 availableShares = vault.balanceOf(address(this));
+        if (totalShares > availableShares) totalShares = availableShares;
+        vault.redeem(totalShares, recipient, address(this)); // SINGLE redeem
+        // Principal tracking intentionally untouched (surplus-only), as in _skimSurplus.
     }
 }

@@ -20,6 +20,12 @@ contract MockAMMAdapter is IAMMAdapter {
     /// @notice Whether an exchange rate has been explicitly set
     mapping(address => mapping(address => bool)) public rateSet;
 
+    /// @notice Number of times swap() has been called (test instrumentation)
+    uint256 public swapCount;
+
+    /// @notice The amountIn of the most recent swap() call (test instrumentation)
+    uint256 public lastAmountIn;
+
     /**
      * @notice Set the exchange rate for a token pair
      * @param tokenIn The input token address
@@ -44,6 +50,9 @@ contract MockAMMAdapter is IAMMAdapter {
         override
         returns (uint256 amountOut)
     {
+        swapCount++;
+        lastAmountIn = amountIn;
+
         // Get exchange rate (default 1:1 if not set)
         uint256 rate = rateSet[tokenIn][tokenOut] ? exchangeRates[tokenIn][tokenOut] : 1e18;
 

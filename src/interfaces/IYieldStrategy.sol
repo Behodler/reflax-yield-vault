@@ -82,12 +82,24 @@ interface IYieldStrategy {
     function totalWithdrawal(address token, address client) external;
 
     /**
-     * @notice Withdraw surplus from a client's balance to a specified recipient
-     * @param token The token address to withdraw
-     * @param client The client address whose balance to withdraw from
-     * @param amount The amount to withdraw
-     * @param recipient The address that will receive the withdrawn tokens
-     * @dev Only authorized withdrawers can call this function. This is used to extract surplus yield.
+     * @notice Skim surplus (yield) from a client's balance to a specified recipient
+     * @param token The token address to skim
+     * @param client The client address whose surplus to skim
+     * @param amount The amount of surplus to skim
+     * @param recipient The address that will receive the skimmed tokens
+     * @dev Only authorized withdrawers can call this function. This only ever extracts surplus
+     *      yield; principal accounting is never touched.
      */
-    function withdrawFrom(address token, address client, uint256 amount, address recipient) external;
+    function skimSurplus(address token, address client, uint256 amount, address recipient) external;
+
+    /**
+     * @notice Skim the full available surplus (yield) of multiple clients in a single underlying
+     *         withdrawal, all proceeds to one recipient. Snapshot semantics: every client's surplus
+     *         is read before any redemption (each gets a slice of the same pre-batch yield),
+     *         differing intentionally from N sequential skimSurplus calls. Principal untouched.
+     * @param token The token address to skim
+     * @param clients The client addresses whose full available surplus is skimmed
+     * @param recipient The address that will receive all skimmed proceeds
+     */
+    function skimSurplusBatch(address token, address[] calldata clients, address recipient) external;
 }

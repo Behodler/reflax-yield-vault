@@ -66,14 +66,14 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     event WithdrawerAuthorizationSet(address indexed withdrawer, bool authorized);
 
     /**
-     * @notice Emitted when an authorized withdrawer withdraws from a client balance
-     * @param token The token address that was withdrawn
-     * @param client The client address whose balance was withdrawn from
-     * @param withdrawer The withdrawer address that performed the withdrawal
-     * @param amount The amount that was withdrawn
-     * @param recipient The address that received the withdrawn tokens
+     * @notice Emitted when an authorized withdrawer skims surplus from a client balance
+     * @param token The token address that was skimmed
+     * @param client The client address whose surplus was skimmed
+     * @param withdrawer The withdrawer address that performed the skim
+     * @param amount The surplus amount that was skimmed
+     * @param recipient The address that received the skimmed tokens
      */
-    event WithdrawnFrom(
+    event SurplusSkimmed(
         address indexed token, address indexed client, address indexed withdrawer, uint256 amount, address recipient
     );
 
@@ -270,14 +270,14 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     }
 
     /**
-     * @notice Withdraw surplus from a client's balance to a specified recipient
-     * @param token The token address to withdraw
-     * @param client The client address whose balance to withdraw from
-     * @param amount The amount to withdraw
-     * @param recipient The address that will receive the withdrawn tokens
+     * @notice Skim surplus (yield) from a client's balance to a specified recipient
+     * @param token The token address to skim
+     * @param client The client address whose surplus to skim
+     * @param amount The amount of surplus to skim
+     * @param recipient The address that will receive the skimmed tokens
      * @dev Only authorized withdrawers can call this function. This is used to extract surplus yield.
      */
-    function withdrawFrom(address token, address client, uint256 amount, address recipient)
+    function skimSurplus(address token, address client, uint256 amount, address recipient)
         external
         onlyAuthorizedWithdrawer
         nonReentrant
@@ -292,10 +292,31 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
         uint256 clientBalance = this.balanceOf(token, client);
         require(clientBalance >= amount, "AYieldStrategy: insufficient client balance");
 
-        // Perform the withdrawal through the virtual function
-        _withdrawFrom(token, client, amount, recipient);
+        // Perform the skim through the virtual function
+        _skimSurplus(token, client, amount, recipient);
 
-        emit WithdrawnFrom(token, client, msg.sender, amount, recipient);
+        emit SurplusSkimmed(token, client, msg.sender, amount, recipient);
+    }
+
+    /**
+     * @notice Skim the full available surplus of multiple clients in a single underlying op
+     * @param token The token address to skim
+     * @param clients The client addresses whose full available surplus is skimmed
+     * @param recipient The address that will receive all skimmed proceeds
+     * @dev Only authorized withdrawers can call this function. Concrete strategies override
+     *      _skimSurplusBatch to collapse the batch into a single redeem/swap. Snapshot semantics:
+     *      every client's surplus is read before any redemption. Principal accounting untouched.
+     */
+    function skimSurplusBatch(address token, address[] calldata clients, address recipient)
+        external
+        onlyAuthorizedWithdrawer
+        nonReentrant
+        whenNotPaused
+    {
+        require(token != address(0), "AYieldStrategy: token cannot be zero address");
+        require(recipient != address(0), "AYieldStrategy: recipient cannot be zero address");
+        require(clients.length > 0, "AYieldStrategy: empty clients");
+        _skimSurplusBatch(token, clients, recipient);
     }
 
     // ============ VIRTUAL FUNCTIONS ============
@@ -317,14 +338,25 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     function _totalWithdraw(address token, address client, uint256 amount) internal virtual;
 
     /**
-     * @notice Internal withdrawFrom implementation to be overridden by concrete contracts
-     * @param token The token address to withdraw
-     * @param client The client address whose balance to withdraw from
-     * @param amount The amount to withdraw
-     * @param recipient The address that will receive the withdrawn tokens
-     * @dev Must be implemented by concrete vault contracts to define withdrawFrom logic
+     * @notice Internal skimSurplus implementation to be overridden by concrete contracts
+     * @param token The token address to skim
+     * @param client The client address whose surplus to skim
+     * @param amount The amount of surplus to skim
+     * @param recipient The address that will receive the skimmed tokens
+     * @dev Must be implemented by concrete vault contracts to define skimSurplus logic
      */
-    function _withdrawFrom(address token, address client, uint256 amount, address recipient) internal virtual;
+    function _skimSurplus(address token, address client, uint256 amount, address recipient) internal virtual;
+
+    /**
+     * @notice Internal batch skim implementation to be overridden by concrete contracts
+     * @param token The token address to skim
+     * @param clients The client addresses whose full available surplus is skimmed
+     * @param recipient The address that will receive all skimmed proceeds
+     * @dev Abstract: each concrete strategy collapses the batch into a single redeem/swap.
+     *      Snapshots total value once, sums per-client floored shares, leaves principal untouched,
+     *      and emits one SurplusSkimmed per surplus-bearing client.
+     */
+    function _skimSurplusBatch(address token, address[] calldata clients, address recipient) internal virtual;
 
     // ============ VIRTUAL FUNCTIONS ============
 

@@ -18,6 +18,9 @@ contract MockERC4626Vault is MockERC20 {
     /// @notice Fee in basis points (e.g., 100 = 1%) applied on deposits
     uint256 private _feeBps;
 
+    /// @notice Number of times redeem() has been called (test instrumentation)
+    uint256 public redeemCount;
+
     /**
      * @notice Initialize the mock ERC4626 vault
      * @param _name The name of the vault token
@@ -46,6 +49,7 @@ contract MockERC4626Vault is MockERC20 {
     function redeem(uint256 shares, address receiver, address shareOwner) external returns (uint256 assets) {
         require(balanceOf(shareOwner) >= shares, "MockERC4626Vault: insufficient shares");
 
+        redeemCount++;
         assets = _convertToAssetsInternal(shares);
         _burn(shareOwner, shares);
         _totalAssets -= assets;
