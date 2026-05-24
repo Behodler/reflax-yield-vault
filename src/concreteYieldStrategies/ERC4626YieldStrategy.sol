@@ -10,9 +10,8 @@ import "@openzeppelin/contracts/interfaces/IERC4626.sol";
  * @title ERC4626YieldStrategy
  * @notice Generic yield strategy adapter for any standard ERC4626 vault
  * @dev Extends AYieldStrategy to provide a simple adapter for ERC4626-compliant vaults.
- *      Unlike AutoPoolYieldStrategy, shares are held directly by this contract — there is
- *      no secondary staking layer (e.g., MainRewarder). This dramatically simplifies the
- *      deposit/withdraw flow to single vault calls.
+ *      Shares are held directly by this contract — there is no secondary staking layer.
+ *      This dramatically simplifies the deposit/withdraw flow to single vault calls.
  *
  *      This strategy is NOT designed for any specific token-vault combo. It works for any
  *      ERC4626-compliant vault (yBOLD, sBOLD, sUSDS, etc.) via constructor-only configuration.
@@ -383,7 +382,7 @@ contract ERC4626YieldStrategy is AYieldStrategy {
         // Calculate available surplus (yield)
         uint256 surplus = totalBalance > principal ? totalBalance - principal : 0;
 
-        // CRITICAL: withdrawFrom is ONLY for surplus extraction
+        // CRITICAL: skimSurplus is ONLY for surplus extraction
         require(
             amount <= surplus,
             "ERC4626YieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal"

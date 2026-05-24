@@ -418,7 +418,7 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         // Calculate available surplus (yield)
         uint256 surplus = totalBalance > principal ? totalBalance - principal : 0;
 
-        // CRITICAL: withdrawFrom is ONLY for surplus extraction
+        // CRITICAL: skimSurplus is ONLY for surplus extraction
         require(
             amount <= surplus,
             "ERC4626MarketYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal"
@@ -482,8 +482,7 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         uint256 idealUnderlying = vault.convertToAssets(totalShares);
         uint256 minOut = idealUnderlying * (MAX_BPS - slippageToleranceBps) / MAX_BPS;
         IERC20(address(vault)).safeIncreaseAllowance(address(ammAdapter), totalShares);
-        uint256 underlyingReceived =
-            ammAdapter.swap(address(vault), address(underlyingToken), totalShares, minOut); // SINGLE swap
+        uint256 underlyingReceived = ammAdapter.swap(address(vault), address(underlyingToken), totalShares, minOut); // SINGLE swap
         underlyingToken.safeTransfer(recipient, underlyingReceived);
         // Principal tracking intentionally untouched (surplus-only), as in _skimSurplus.
     }

@@ -448,9 +448,9 @@ contract ConvertToSharesRefactorTests is Test {
         assertEq(balanceAfter, 0, "User balance should be zero after capped withdrawal");
     }
 
-    // NOTE: test_Group4_2_ReStakingPreservesYield removed during the AutoPool->ERC4626 migration.
-    // It asserted that remaining yield shares stay staked in a MainRewarder. ERC4626YieldStrategy
-    // holds shares directly with no staking layer, so there is no ERC4626 analog for that assertion.
+    // NOTE: test_Group4_2_ReStakingPreservesYield removed during this migration. It asserted that
+    // remaining yield shares stay staked in a secondary rewarder layer. This strategy holds shares
+    // directly with no staking layer, so there is no analog for that assertion.
 
     /**
      * @notice Test 4.3: Accounting drift doesn't break vault invariants

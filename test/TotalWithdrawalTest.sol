@@ -207,8 +207,8 @@ contract TotalWithdrawalTest is Test {
 
     // ============ EDGE CASE TESTS ============
 
-    // NOTE: testMultipleTokensIndependentStates removed because AutoDolaYieldStrategy
-    // only supports DOLA (depositToken). Multi-token tests not applicable.
+    // NOTE: testMultipleTokensIndependentStates removed because the strategy only supports a
+    // single underlying token (depositToken). Multi-token tests not applicable.
 
     function testMultipleClientsIndependentStates() public {
         address client2 = address(5);

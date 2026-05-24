@@ -791,4 +791,214 @@ contract ERC4626MarketYieldStrategyTest is Test {
         // Received should be slightly less than requested
         assertLt(received, 500e18);
     }
+
+    // ============ skimSurplusBatch TESTS ============
+
+    event SurplusSkimmed(
+        address indexed token, address indexed client, address indexed withdrawer, uint256 amount, address recipient
+    );
+
+    /// @notice Batch skim over multiple clients performs EXACTLY ONE swap, aggregated amountIn
+    function testSkimSurplusBatchSingleSwap() public {
+        vm.startPrank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, user1);
+        strategy.deposit(address(underlyingToken), 2000e18, user2);
+        strategy.deposit(address(underlyingToken), 3000e18, user3);
+        vm.stopPrank();
+
+        // 10% yield on 6000 => 600 surplus
+        erc4626Vault.simulateYield(600e18);
+
+        // Expected aggregate shares = sum of per-client floored convertToShares(surplus_c)
+        uint256 td = strategy.getTotalDeposited(address(underlyingToken));
+        uint256 totalValue = erc4626Vault.convertToAssets(erc4626Vault.balanceOf(address(strategy)));
+        uint256 expectedShares;
+        address[] memory clients = new address[](3);
+        clients[0] = user1;
+        clients[1] = user2;
+        clients[2] = user3;
+        for (uint256 i = 0; i < clients.length; i++) {
+            uint256 principal = strategy.principalOf(address(underlyingToken), clients[i]);
+            uint256 total = (totalValue * principal) / td;
+            uint256 surplus = total > principal ? total - principal : 0;
+            expectedShares += erc4626Vault.convertToShares(surplus);
+        }
+
+        uint256 swapsBefore = ammAdapter.swapCount();
+
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+
+        // Exactly one swap for the whole batch
+        assertEq(ammAdapter.swapCount() - swapsBefore, 1, "batch must do exactly one swap");
+        // amountIn proves aggregation across all clients
+        assertEq(ammAdapter.lastAmountIn(), expectedShares, "swap amountIn == aggregated shares");
+    }
+
+    /// @notice Batch skim leaves principal / getTotalDeposited unchanged
+    function testSkimSurplusBatchPrincipalUnchanged() public {
+        vm.startPrank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, user1);
+        strategy.deposit(address(underlyingToken), 2000e18, user2);
+        vm.stopPrank();
+
+        erc4626Vault.simulateYield(300e18);
+
+        uint256 totalDepositedBefore = strategy.getTotalDeposited(address(underlyingToken));
+
+        address[] memory clients = new address[](2);
+        clients[0] = user1;
+        clients[1] = user2;
+
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+
+        assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+        assertEq(strategy.principalOf(address(underlyingToken), user2), 2000e18);
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), totalDepositedBefore);
+    }
+
+    /// @notice One SurplusSkimmed event per surplus-bearing client
+    function testSkimSurplusBatchEmitsPerSurplusClient() public {
+        vm.startPrank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, user1);
+        strategy.deposit(address(underlyingToken), 1000e18, user2);
+        vm.stopPrank();
+
+        erc4626Vault.simulateYield(200e18);
+
+        uint256 surplus1 = strategy.totalBalanceOf(address(underlyingToken), user1)
+            - strategy.principalOf(address(underlyingToken), user1);
+        uint256 surplus2 = strategy.totalBalanceOf(address(underlyingToken), user2)
+            - strategy.principalOf(address(underlyingToken), user2);
+
+        address[] memory clients = new address[](2);
+        clients[0] = user1;
+        clients[1] = user2;
+
+        vm.expectEmit(true, true, true, true);
+        emit SurplusSkimmed(address(underlyingToken), user1, withdrawer, surplus1, withdrawer);
+        vm.expectEmit(true, true, true, true);
+        emit SurplusSkimmed(address(underlyingToken), user2, withdrawer, surplus2, withdrawer);
+
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+    }
+
+    /// @notice Zero-surplus clients are skipped (still one swap for the rest)
+    function testSkimSurplusBatchSkipsZeroSurplusClient() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, user1);
+
+        erc4626Vault.simulateYield(100e18);
+
+        address[] memory clients = new address[](3);
+        clients[0] = user1;
+        clients[1] = user2; // zero principal
+        clients[2] = user3; // zero principal
+
+        uint256 swapsBefore = ammAdapter.swapCount();
+
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+
+        assertEq(ammAdapter.swapCount() - swapsBefore, 1, "one swap despite zero-surplus clients");
+        assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+    }
+
+    /// @notice No-op (no swap) when there is no surplus at all
+    function testSkimSurplusBatchNoSurplusNoSwap() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, user1);
+
+        address[] memory clients = new address[](1);
+        clients[0] = user1;
+
+        uint256 swapsBefore = ammAdapter.swapCount();
+
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+
+        assertEq(ammAdapter.swapCount() - swapsBefore, 0, "no swap when no surplus");
+    }
+
+    /// @notice minOut is computed on the AGGREGATE: a sub-minOut AMM rate reverts the whole batch
+    function testSkimSurplusBatchMinOutOnAggregateReverts() public {
+        vm.startPrank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, user1);
+        strategy.deposit(address(underlyingToken), 1000e18, user2);
+        vm.stopPrank();
+
+        erc4626Vault.simulateYield(400e18);
+
+        // Tight tolerance, then set sell rate below it
+        vm.prank(owner);
+        strategy.setSlippageTolerance(10); // 0.1%
+        ammAdapter.setExchangeRate(address(erc4626Vault), address(underlyingToken), 0.98e18); // 2% loss
+
+        address[] memory clients = new address[](2);
+        clients[0] = user1;
+        clients[1] = user2;
+
+        vm.expectRevert("MockAMMAdapter: insufficient output amount");
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+    }
+
+    // ---- guard / access cases ----
+
+    function testSkimSurplusBatchRevertsForNonWithdrawer() public {
+        address[] memory clients = new address[](1);
+        clients[0] = user1;
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized withdrawers");
+        vm.prank(randomUser);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+    }
+
+    function testSkimSurplusBatchRevertsWhenPaused() public {
+        address[] memory clients = new address[](1);
+        clients[0] = user1;
+        vm.prank(pauser);
+        strategy.pause();
+        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+    }
+
+    function testSkimSurplusBatchRevertsZeroToken() public {
+        address[] memory clients = new address[](1);
+        clients[0] = user1;
+        vm.expectRevert("AYieldStrategy: token cannot be zero address");
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(0), clients, withdrawer);
+    }
+
+    function testSkimSurplusBatchRevertsZeroRecipient() public {
+        address[] memory clients = new address[](1);
+        clients[0] = user1;
+        vm.expectRevert("AYieldStrategy: recipient cannot be zero address");
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, address(0));
+    }
+
+    function testSkimSurplusBatchRevertsEmptyClients() public {
+        address[] memory clients = new address[](0);
+        vm.expectRevert("AYieldStrategy: empty clients");
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+    }
+
+    function testSkimSurplusBatchRevertsZeroAddressClientEntry() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, user1);
+        erc4626Vault.simulateYield(100e18);
+
+        address[] memory clients = new address[](2);
+        clients[0] = user1;
+        clients[1] = address(0);
+
+        vm.expectRevert("ERC4626MarketYieldStrategy: client cannot be zero address");
+        vm.prank(withdrawer);
+        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+    }
 }
