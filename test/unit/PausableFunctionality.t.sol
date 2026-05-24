@@ -2,21 +2,18 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
+import "../../src/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import "../../src/mocks/MockERC20.sol";
-import "../mocks/MockAutoPool.sol";
-import "../../src/mocks/MockMainRewarder.sol";
+import "../mocks/MockERC4626Vault.sol";
 
 /**
  * @title PausableFunctionalityTest
- * @notice Unit tests for IPausable implementation in AYieldStrategy and AutoPoolYieldStrategy
+ * @notice Unit tests for IPausable implementation in AYieldStrategy and ERC4626YieldStrategy
  */
 contract PausableFunctionalityTest is Test {
-    AutoPoolYieldStrategy vault;
+    ERC4626YieldStrategy vault;
     MockERC20 underlyingToken;
-    MockERC20 tokeToken;
-    MockAutoPool autoPoolVault;
-    MockMainRewarder mainRewarder;
+    MockERC4626Vault erc4626Vault;
 
     address owner = address(0x1234);
     address pauser = address(0x5678);
@@ -26,29 +23,20 @@ contract PausableFunctionalityTest is Test {
     address randomUser = address(0x2468);
 
     uint256 constant INITIAL_TOKEN_SUPPLY = 10000000e18;
-    uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18;
 
     function setUp() public {
         // Deploy mock tokens
         underlyingToken = new MockERC20("Underlying", "UNDERLYING", 18);
-        tokeToken = new MockERC20("TOKE", "TOKE", 18);
 
-        // Deploy mock MainRewarder
-        mainRewarder = new MockMainRewarder(address(tokeToken));
-
-        // Deploy mock autoPool vault
-        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(underlyingToken), address(mainRewarder));
+        // Deploy mock ERC4626 vault
+        erc4626Vault = new MockERC4626Vault("Vault Shares", "vUNDERLYING", address(underlyingToken));
 
         // Deploy the vault
         vm.prank(owner);
-        vault = new AutoPoolYieldStrategy(
-            owner, address(underlyingToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
-        );
+        vault = new ERC4626YieldStrategy(owner, address(underlyingToken), address(erc4626Vault));
 
         // Mint tokens
         underlyingToken.mint(client, INITIAL_TOKEN_SUPPLY);
-        underlyingToken.mint(address(autoPoolVault), INITIAL_TOKEN_SUPPLY);
-        tokeToken.mint(address(mainRewarder), INITIAL_TOKE_SUPPLY);
 
         // Authorize client and withdrawer
         vm.startPrank(owner);
@@ -109,9 +97,7 @@ contract PausableFunctionalityTest is Test {
     function testPauserReturnsZeroIfNotSet() public {
         // Deploy new vault without setting pauser
         vm.prank(owner);
-        AutoPoolYieldStrategy newVault = new AutoPoolYieldStrategy(
-            owner, address(underlyingToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
-        );
+        ERC4626YieldStrategy newVault = new ERC4626YieldStrategy(owner, address(underlyingToken), address(erc4626Vault));
 
         assertEq(newVault.pauser(), address(0));
     }
@@ -268,9 +254,9 @@ contract PausableFunctionalityTest is Test {
         vault.withdraw(address(underlyingToken), 500e18, client);
     }
 
-    // ============ whenNotPaused MODIFIER TESTS - withdrawFrom() ============
+    // ============ whenNotPaused MODIFIER TESTS - skimSurplus() ============
 
-    function testWithdrawFromWhenNotPaused() public {
+    function testSkimSurplusWhenNotPaused() public {
         uint256 depositAmount = 10000e18;
 
         // Setup: deposit first
@@ -278,14 +264,14 @@ contract PausableFunctionalityTest is Test {
         vault.deposit(address(underlyingToken), depositAmount, client);
 
         // Generate yield
-        autoPoolVault.simulateYield(1000e18);
+        erc4626Vault.simulateYield(1000e18);
 
-        // WithdrawFrom should work
+        // skimSurplus should work
         vm.prank(withdrawer);
-        vault.withdrawFrom(address(underlyingToken), client, 500e18, withdrawer);
+        vault.skimSurplus(address(underlyingToken), client, 500e18, withdrawer);
     }
 
-    function testWithdrawFromRevertsWhenPaused() public {
+    function testSkimSurplusRevertsWhenPaused() public {
         uint256 depositAmount = 10000e18;
 
         // Setup: deposit first
@@ -293,16 +279,16 @@ contract PausableFunctionalityTest is Test {
         vault.deposit(address(underlyingToken), depositAmount, client);
 
         // Generate yield
-        autoPoolVault.simulateYield(1000e18);
+        erc4626Vault.simulateYield(1000e18);
 
         // Pause
         vm.prank(pauser);
         vault.pause();
 
-        // WithdrawFrom should revert
+        // skimSurplus should revert
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         vm.prank(withdrawer);
-        vault.withdrawFrom(address(underlyingToken), client, 500e18, withdrawer);
+        vault.skimSurplus(address(underlyingToken), client, 500e18, withdrawer);
     }
 
     // ============ whenNotPaused MODIFIER TESTS - totalWithdrawal() ============
@@ -334,31 +320,6 @@ contract PausableFunctionalityTest is Test {
         // Should work when not paused (initiates phase 1)
         vm.prank(owner);
         vault.totalWithdrawal(address(underlyingToken), client);
-    }
-
-    // ============ whenNotPaused MODIFIER TESTS - claimTokeRewards() ============
-
-    function testClaimTokeRewardsRevertsWhenPaused() public {
-        // Pause
-        vm.prank(pauser);
-        vault.pause();
-
-        // ClaimTokeRewards should revert
-        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
-        vm.prank(owner);
-        vault.claimTokeRewards(owner);
-    }
-
-    function testClaimTokeRewardsWorksWhenNotPaused() public {
-        uint256 depositAmount = 1000e18;
-
-        // Setup: deposit first
-        vm.prank(client);
-        vault.deposit(address(underlyingToken), depositAmount, client);
-
-        // Should work when not paused
-        vm.prank(owner);
-        vault.claimTokeRewards(owner);
     }
 
     // ============ emergencyWithdraw TESTS (should work when paused) ============

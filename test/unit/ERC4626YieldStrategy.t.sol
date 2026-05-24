@@ -212,10 +212,10 @@ contract ERC4626YieldStrategyTest is Test {
         assertEq(strategy.principalOf(address(underlyingToken), client), 0);
     }
 
-    // ============ _withdrawFrom() SURPLUS EXTRACTION TESTS ============
+    // ============ _skimSurplus() SURPLUS EXTRACTION TESTS ============
 
-    /// @notice Test _withdrawFrom() only allows surplus extraction
-    function testWithdrawFromOnlyAllowsSurplus() public {
+    /// @notice Test _skimSurplus() only allows surplus extraction
+    function testSkimSurplusOnlyAllowsSurplus() public {
         uint256 depositAmount = 10000e18;
 
         vm.prank(client);
@@ -231,14 +231,14 @@ contract ERC4626YieldStrategyTest is Test {
         // Withdraw 50% of surplus
         uint256 withdrawAmount = surplus / 2;
         vm.prank(withdrawer);
-        strategy.withdrawFrom(address(underlyingToken), client, withdrawAmount, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), client, withdrawAmount, withdrawer);
 
         // Principal MUST NOT change
         assertEq(strategy.principalOf(address(underlyingToken), client), depositAmount);
     }
 
-    /// @notice Test _withdrawFrom() reverts when amount exceeds surplus
-    function testWithdrawFromRevertsWhenExceedsSurplus() public {
+    /// @notice Test _skimSurplus() reverts when amount exceeds surplus
+    function testSkimSurplusRevertsWhenExceedsSurplus() public {
         uint256 depositAmount = 10000e18;
 
         vm.prank(client);
@@ -254,11 +254,11 @@ contract ERC4626YieldStrategyTest is Test {
         // Attempt to withdraw more than surplus
         vm.expectRevert("ERC4626YieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal");
         vm.prank(withdrawer);
-        strategy.withdrawFrom(address(underlyingToken), client, surplus + 50e18, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), client, surplus + 50e18, withdrawer);
     }
 
-    /// @notice Test _withdrawFrom() never modifies principal
-    function testWithdrawFromNeverModifiesPrincipal() public {
+    /// @notice Test _skimSurplus() never modifies principal
+    function testSkimSurplusNeverModifiesPrincipal() public {
         uint256 depositAmount = 10000e18;
 
         vm.prank(client);
@@ -277,7 +277,7 @@ contract ERC4626YieldStrategyTest is Test {
             if (surplus > 10e18) {
                 uint256 withdrawAmount = surplus / 4;
                 vm.prank(withdrawer);
-                strategy.withdrawFrom(address(underlyingToken), client, withdrawAmount, withdrawer);
+                strategy.skimSurplus(address(underlyingToken), client, withdrawAmount, withdrawer);
 
                 // Principal MUST NOT change
                 assertEq(strategy.principalOf(address(underlyingToken), client), principalBefore);
@@ -596,8 +596,8 @@ contract ERC4626YieldStrategyTest is Test {
 
     // ============ NO SURPLUS SCENARIO ============
 
-    /// @notice Test withdrawFrom reverts when there is no surplus
-    function testWithdrawFromRevertsWithNoSurplus() public {
+    /// @notice Test skimSurplus reverts when there is no surplus
+    function testSkimSurplusRevertsWithNoSurplus() public {
         uint256 depositAmount = 10000e18;
 
         vm.prank(client);
@@ -606,7 +606,7 @@ contract ERC4626YieldStrategyTest is Test {
         // No yield generated
         vm.expectRevert("ERC4626YieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal");
         vm.prank(withdrawer);
-        strategy.withdrawFrom(address(underlyingToken), client, 1e18, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), client, 1e18, withdrawer);
     }
 
     // ============ VAULT APPRECIATION SCENARIO ============
@@ -677,7 +677,7 @@ contract ERC4626YieldStrategyTest is Test {
 
         // Withdraw EXACTLY the surplus
         vm.prank(withdrawer);
-        strategy.withdrawFrom(address(underlyingToken), client, surplus, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), client, surplus, withdrawer);
 
         // Principal unchanged
         assertEq(strategy.principalOf(address(underlyingToken), client), depositAmount);

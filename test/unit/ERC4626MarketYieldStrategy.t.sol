@@ -462,10 +462,10 @@ contract ERC4626MarketYieldStrategyTest is Test {
         strategy.emergencyWithdraw(1000e18);
     }
 
-    // ============ SURPLUS WITHDRAWAL (withdrawFrom) TESTS ============
+    // ============ SURPLUS WITHDRAWAL (skimSurplus) TESTS ============
 
-    /// @notice Test withdrawFrom only allows surplus extraction
-    function testWithdrawFromOnlyAllowsSurplus() public {
+    /// @notice Test skimSurplus only allows surplus extraction
+    function testSkimSurplusOnlyAllowsSurplus() public {
         uint256 depositAmount = 10000e18;
 
         vm.prank(client);
@@ -481,14 +481,14 @@ contract ERC4626MarketYieldStrategyTest is Test {
         // Withdraw 50% of surplus
         uint256 withdrawAmount = surplus / 2;
         vm.prank(withdrawer);
-        strategy.withdrawFrom(address(underlyingToken), client, withdrawAmount, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), client, withdrawAmount, withdrawer);
 
         // Principal MUST NOT change
         assertEq(strategy.principalOf(address(underlyingToken), client), depositAmount);
     }
 
-    /// @notice Test withdrawFrom reverts when amount exceeds surplus
-    function testWithdrawFromRevertsWhenExceedsSurplus() public {
+    /// @notice Test skimSurplus reverts when amount exceeds surplus
+    function testSkimSurplusRevertsWhenExceedsSurplus() public {
         uint256 depositAmount = 10000e18;
 
         vm.prank(client);
@@ -506,11 +506,11 @@ contract ERC4626MarketYieldStrategyTest is Test {
             "ERC4626MarketYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal"
         );
         vm.prank(withdrawer);
-        strategy.withdrawFrom(address(underlyingToken), client, surplus + 50e18, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), client, surplus + 50e18, withdrawer);
     }
 
-    /// @notice Test withdrawFrom never modifies principal
-    function testWithdrawFromNeverModifiesPrincipal() public {
+    /// @notice Test skimSurplus never modifies principal
+    function testSkimSurplusNeverModifiesPrincipal() public {
         uint256 depositAmount = 10000e18;
 
         vm.prank(client);
@@ -529,7 +529,7 @@ contract ERC4626MarketYieldStrategyTest is Test {
             if (surplus > 10e18) {
                 uint256 withdrawAmount = surplus / 4;
                 vm.prank(withdrawer);
-                strategy.withdrawFrom(address(underlyingToken), client, withdrawAmount, withdrawer);
+                strategy.skimSurplus(address(underlyingToken), client, withdrawAmount, withdrawer);
 
                 // Principal MUST NOT change
                 assertEq(strategy.principalOf(address(underlyingToken), client), principalBefore);
@@ -540,8 +540,8 @@ contract ERC4626MarketYieldStrategyTest is Test {
         assertEq(strategy.principalOf(address(underlyingToken), client), depositAmount);
     }
 
-    /// @notice Test withdrawFrom reverts when there is no surplus
-    function testWithdrawFromRevertsWithNoSurplus() public {
+    /// @notice Test skimSurplus reverts when there is no surplus
+    function testSkimSurplusRevertsWithNoSurplus() public {
         uint256 depositAmount = 10000e18;
 
         vm.prank(client);
@@ -552,7 +552,7 @@ contract ERC4626MarketYieldStrategyTest is Test {
             "ERC4626MarketYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal"
         );
         vm.prank(withdrawer);
-        strategy.withdrawFrom(address(underlyingToken), client, 1e18, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), client, 1e18, withdrawer);
     }
 
     // ============ TOTAL WITHDRAWAL TWO-PHASE TESTS ============

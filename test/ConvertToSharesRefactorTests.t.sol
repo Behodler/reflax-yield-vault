@@ -2,10 +2,9 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
+import "../src/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "./mocks/MockAutoPool.sol";
-import "../src/mocks/MockMainRewarder.sol";
+import "./mocks/MockERC4626Vault.sol";
 
 /**
  * @title ConvertToSharesRefactorTests
@@ -24,18 +23,15 @@ import "../src/mocks/MockMainRewarder.sol";
  *      - Test Specification: story-028-test-specification.md
  */
 contract ConvertToSharesRefactorTests is Test {
-    AutoPoolYieldStrategy vault;
+    ERC4626YieldStrategy vault;
     MockERC20 underlyingToken;
-    MockERC20 tokeToken;
-    MockAutoPool autoPoolVault;
-    MockMainRewarder mainRewarder;
+    MockERC4626Vault erc4626Vault;
 
     address owner = address(0x1234);
     address client = address(0x5678);
     address user = address(0xDEF0);
 
     uint256 constant INITIAL_TOKEN_SUPPLY = 100000000e18; // 100M tokens
-    uint256 constant INITIAL_TOKE_SUPPLY = 1000000e18; // 1M TOKE
 
     // Events
     event Deposited(
@@ -49,24 +45,16 @@ contract ConvertToSharesRefactorTests is Test {
     function setUp() public {
         // Deploy mock tokens
         underlyingToken = new MockERC20("Underlying", "UNDERLYING", 18);
-        tokeToken = new MockERC20("TOKE", "TOKE", 18);
 
-        // Deploy mock MainRewarder
-        mainRewarder = new MockMainRewarder(address(tokeToken));
+        // Deploy mock ERC4626 vault
+        erc4626Vault = new MockERC4626Vault("Vault Shares", "vUNDERLYING", address(underlyingToken));
 
-        // Deploy mock autoPool vault
-        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(underlyingToken), address(mainRewarder));
-
-        // Deploy AutoPoolYieldStrategy
+        // Deploy ERC4626YieldStrategy
         vm.prank(owner);
-        vault = new AutoPoolYieldStrategy(
-            owner, address(underlyingToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
-        );
+        vault = new ERC4626YieldStrategy(owner, address(underlyingToken), address(erc4626Vault));
 
         // Mint tokens
         underlyingToken.mint(client, INITIAL_TOKEN_SUPPLY);
-        underlyingToken.mint(address(autoPoolVault), INITIAL_TOKEN_SUPPLY);
-        tokeToken.mint(address(mainRewarder), INITIAL_TOKE_SUPPLY);
 
         // Authorize client
         vm.prank(owner);
@@ -79,12 +67,12 @@ contract ConvertToSharesRefactorTests is Test {
         vm.prank(client);
         underlyingToken.approve(address(vault), amount);
 
-        uint256 sharesBefore = mainRewarder.balanceOf(address(vault));
+        uint256 sharesBefore = erc4626Vault.balanceOf(address(vault));
 
         vm.prank(client);
         vault.deposit(address(underlyingToken), amount, user);
 
-        uint256 sharesAfter = mainRewarder.balanceOf(address(vault));
+        uint256 sharesAfter = erc4626Vault.balanceOf(address(vault));
         return sharesAfter - sharesBefore;
     }
 
@@ -99,7 +87,7 @@ contract ConvertToSharesRefactorTests is Test {
     }
 
     function _simulateYield(uint256 yieldAmount) internal {
-        autoPoolVault.simulateYield(yieldAmount);
+        erc4626Vault.simulateYield(yieldAmount);
     }
 
     // ============ TEST GROUP 1: YIELD-EXCLUSION VERIFICATION ============
@@ -125,7 +113,7 @@ contract ConvertToSharesRefactorTests is Test {
         assertLe(dolaReceived, depositAmount, "User should not receive more than principal");
 
         // Verify yield remains locked in vault
-        uint256 remainingShares = mainRewarder.balanceOf(address(vault));
+        uint256 remainingShares = erc4626Vault.balanceOf(address(vault));
         assertTrue(remainingShares > 0, "Yield shares should remain in vault");
     }
 
@@ -162,7 +150,7 @@ contract ConvertToSharesRefactorTests is Test {
         assertLe(totalPrincipalWithdrawn, totalPrincipalDeposited, "Total withdrawn should not exceed deposited");
 
         // Verify: yield remains locked (~100 DOLA worth of shares)
-        uint256 vaultSharesValue = autoPoolVault.previewRedeem(mainRewarder.balanceOf(address(vault)));
+        uint256 vaultSharesValue = erc4626Vault.previewRedeem(erc4626Vault.balanceOf(address(vault)));
         assertGt(vaultSharesValue, 90e18, "Accumulated yield should remain in vault");
 
         // User principal should be zero
@@ -193,7 +181,7 @@ contract ConvertToSharesRefactorTests is Test {
         );
 
         // Assert: Vault retains ~100 DOLA worth of shares (the yield)
-        uint256 remainingSharesValue = autoPoolVault.previewRedeem(mainRewarder.balanceOf(address(vault)));
+        uint256 remainingSharesValue = erc4626Vault.previewRedeem(erc4626Vault.balanceOf(address(vault)));
         assertGt(remainingSharesValue, 95e18, "Vault should retain approximately 100 DOLA yield");
         assertLt(remainingSharesValue, 105e18, "Yield should be approximately 100 DOLA");
     }
@@ -330,7 +318,7 @@ contract ConvertToSharesRefactorTests is Test {
         assertLe(receivedWithExtremeYield, principal, "Even with extreme yield, user gets principal only");
 
         // Verify remaining shares represent massive yield
-        uint256 remainingValue = autoPoolVault.previewRedeem(mainRewarder.balanceOf(address(vault)));
+        uint256 remainingValue = erc4626Vault.previewRedeem(erc4626Vault.balanceOf(address(vault)));
         assertGt(remainingValue, 5000e18, "Extreme yield should remain locked");
     }
 
@@ -347,13 +335,13 @@ contract ConvertToSharesRefactorTests is Test {
         _deposit(depositAmount);
 
         // Get vault state
-        uint256 totalShares = autoPoolVault.balanceOf(address(vault));
+        uint256 totalShares = erc4626Vault.balanceOf(address(vault));
         uint256 totalDeposited = vault.getTotalDeposited(address(underlyingToken));
 
         // Calculate shares using both methods
         uint256 withdrawAmount = 500e18;
         uint256 methodA_shares = (totalShares * withdrawAmount) / totalDeposited; // Manual proportional
-        uint256 methodB_shares = autoPoolVault.convertToShares(withdrawAmount); // ERC4626 standard
+        uint256 methodB_shares = erc4626Vault.convertToShares(withdrawAmount); // ERC4626 standard
 
         // Assert: Methods should be equivalent when no yield
         uint256 difference =
@@ -363,10 +351,10 @@ contract ConvertToSharesRefactorTests is Test {
         // Now test with yield present
         _simulateYield(100e18); // 10% yield
 
-        totalShares = autoPoolVault.balanceOf(address(vault));
+        totalShares = erc4626Vault.balanceOf(address(vault));
 
         uint256 methodA_withYield = (totalShares * withdrawAmount) / totalDeposited;
-        uint256 methodB_withYield = autoPoolVault.convertToShares(withdrawAmount);
+        uint256 methodB_withYield = erc4626Vault.convertToShares(withdrawAmount);
 
         // Assert: Method B should give FEWER shares when yield present (preserves yield)
         assertLt(methodB_withYield, methodA_withYield, "convertToShares should give fewer shares with yield");
@@ -460,33 +448,9 @@ contract ConvertToSharesRefactorTests is Test {
         assertEq(balanceAfter, 0, "User balance should be zero after capped withdrawal");
     }
 
-    /**
-     * @notice Test 4.2: Re-staking preserves yield after withdrawal
-     * @dev Verifies yield shares are re-staked in MainRewarder
-     */
-    function test_Group4_2_ReStakingPreservesYield() public {
-        uint256 principal = 1000e18;
-        uint256 yieldAmount = 100e18;
-
-        // Deposit and accrue yield
-        _deposit(principal);
-        uint256 initialStaked = mainRewarder.balanceOf(address(vault));
-
-        _simulateYield(yieldAmount);
-
-        // Perform withdrawal
-        _withdraw(principal);
-
-        // Check mainRewarder balance after withdrawal
-        uint256 finalStaked = mainRewarder.balanceOf(address(vault));
-
-        // Assert: Remaining shares are staked (not just sitting in vault)
-        assertGt(finalStaked, 0, "Yield shares should be re-staked");
-
-        // Assert: Yield-bearing shares not lost
-        uint256 yieldSharesValue = autoPoolVault.previewRedeem(finalStaked);
-        assertGt(yieldSharesValue, 90e18, "Yield shares should be preserved and staked");
-    }
+    // NOTE: test_Group4_2_ReStakingPreservesYield removed during the AutoPool->ERC4626 migration.
+    // It asserted that remaining yield shares stay staked in a MainRewarder. ERC4626YieldStrategy
+    // holds shares directly with no staking layer, so there is no ERC4626 analog for that assertion.
 
     /**
      * @notice Test 4.3: Accounting drift doesn't break vault invariants
@@ -503,15 +467,15 @@ contract ConvertToSharesRefactorTests is Test {
 
         // Calculate expected vs actual vault state
         uint256 totalDeposited = vault.getTotalDeposited(address(underlyingToken));
-        uint256 actualShares = mainRewarder.balanceOf(address(vault));
-        uint256 expectedShares = autoPoolVault.convertToShares(totalDeposited);
+        uint256 actualShares = erc4626Vault.balanceOf(address(vault));
+        uint256 expectedShares = erc4626Vault.convertToShares(totalDeposited);
 
         // Assert: Actual shares ≥ Expected shares (yield accumulation)
         assertGe(actualShares, expectedShares, "Actual shares should be at least expected shares");
 
         // Assert: Difference represents yield only, not accounting error
         uint256 sharesDifference = actualShares - expectedShares;
-        uint256 yieldValue = autoPoolVault.previewRedeem(sharesDifference);
+        uint256 yieldValue = erc4626Vault.previewRedeem(sharesDifference);
 
         // Yield should be positive (shares worth more than principal)
         assertGt(yieldValue, 0, "Difference should represent positive yield");
@@ -543,7 +507,7 @@ contract ConvertToSharesRefactorTests is Test {
         _deposit(depositAmount);
 
         // Calculate expected shares before withdrawal
-        uint256 expectedShares = autoPoolVault.convertToShares(withdrawAmount);
+        uint256 expectedShares = erc4626Vault.convertToShares(withdrawAmount);
 
         // Expect event with correct data
         vm.expectEmit(true, true, true, false); // Check indexed params, ignore data for now
@@ -570,10 +534,10 @@ contract ConvertToSharesRefactorTests is Test {
         _simulateYield(100e18);
 
         // Calculate expected shares (should be fewer due to yield)
-        uint256 expectedShares = autoPoolVault.convertToShares(withdrawAmount);
+        uint256 expectedShares = erc4626Vault.convertToShares(withdrawAmount);
 
         // Verify expected shares is LESS than total shares (yield-exclusion)
-        uint256 totalShares = autoPoolVault.balanceOf(address(vault));
+        uint256 totalShares = erc4626Vault.balanceOf(address(vault));
         assertLt(expectedShares, totalShares, "Should redeem fewer shares than total when yield present");
 
         // Perform withdrawal (event should use actualShares, not convertToShares(dolaReceived))
@@ -615,7 +579,7 @@ contract ConvertToSharesRefactorTests is Test {
     function test_Group6_2_ZeroWithdrawalReverts() public {
         _deposit(1000e18);
 
-        vm.expectRevert("AutoPoolYieldStrategy: amount must be greater than zero");
+        vm.expectRevert("ERC4626YieldStrategy: amount must be greater than zero");
         vm.prank(client);
         vault.withdraw(address(underlyingToken), 0, user);
     }
@@ -627,7 +591,7 @@ contract ConvertToSharesRefactorTests is Test {
     function test_Group6_3_ZeroAddressReverts() public {
         _deposit(1000e18);
 
-        vm.expectRevert("AutoPoolYieldStrategy: recipient cannot be zero address");
+        vm.expectRevert("ERC4626YieldStrategy: recipient cannot be zero address");
         vm.prank(client);
         vault.withdraw(address(underlyingToken), 100e18, address(0));
     }

@@ -2,24 +2,21 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
+import "../src/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "./mocks/MockAutoPool.sol";
-import "../src/mocks/MockMainRewarder.sol";
+import "./mocks/MockERC4626Vault.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title VaultWithdrawerTest
- * @notice Comprehensive tests for vault withdrawer authorization and withdrawFrom functionality
+ * @notice Comprehensive tests for vault withdrawer authorization and skimSurplus functionality
  */
 contract VaultWithdrawerTest is Test {
     using SafeERC20 for IERC20;
 
-    AutoPoolYieldStrategy public vault;
+    ERC4626YieldStrategy public vault;
     MockERC20 public depositToken;
-    MockERC20 public tokeToken;
-    MockAutoPool public autoPoolVault;
-    MockMainRewarder public mainRewarder;
+    MockERC4626Vault public erc4626Vault;
 
     address public owner;
     address public client;
@@ -28,7 +25,7 @@ contract VaultWithdrawerTest is Test {
     address public unauthorized;
 
     event WithdrawerAuthorizationSet(address indexed withdrawer, bool authorized);
-    event WithdrawnFrom(
+    event SurplusSkimmed(
         address indexed token, address indexed client, address indexed withdrawer, uint256 amount, address recipient
     );
 
@@ -41,31 +38,26 @@ contract VaultWithdrawerTest is Test {
 
         // Deploy mock tokens
         depositToken = new MockERC20("DOLA", "DOLA", 18);
-        tokeToken = new MockERC20("TOKE", "TOKE", 18);
 
-        // Deploy mock external dependencies
-        mainRewarder = new MockMainRewarder(address(tokeToken));
-        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(depositToken), address(mainRewarder));
+        // Deploy mock ERC4626 vault
+        erc4626Vault = new MockERC4626Vault("Vault Shares", "vDOLA", address(depositToken));
 
-        // Deploy the real AutoPoolYieldStrategy
-        vault = new AutoPoolYieldStrategy(
-            owner, address(depositToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
-        );
+        // Deploy the real ERC4626YieldStrategy
+        vault = new ERC4626YieldStrategy(owner, address(depositToken), address(erc4626Vault));
 
         // Authorize client for vault operations
         vault.setClient(client, true);
 
-        // Mint tokens to client and autoPoolVault for testing
+        // Mint tokens to client for testing
         depositToken.mint(client, 10000000e18);
-        depositToken.mint(address(autoPoolVault), 10000000e18);
     }
 
     /**
      * @notice Helper function to set up principal and surplus for a client
-     * @param token The token address (must be depositToken for AutoDolaYieldStrategy)
+     * @param token The token address (must be depositToken)
      * @param account The client account
      * @param principal The principal amount to deposit
-     * @param surplus The surplus amount to simulate (via yield in autoDolaVault)
+     * @param surplus The surplus amount to simulate (via yield in erc4626Vault)
      */
     function setupPrincipalAndSurplus(address token, address account, uint256 principal, uint256 surplus) internal {
         // Mint tokens to account if needed (checking balance to avoid double-minting)
@@ -79,8 +71,7 @@ contract VaultWithdrawerTest is Test {
         vm.stopPrank();
 
         if (surplus > 0) {
-            depositToken.mint(address(autoPoolVault), surplus);
-            autoPoolVault.simulateYield(surplus);
+            erc4626Vault.simulateYield(surplus);
         }
     }
 
@@ -131,9 +122,9 @@ contract VaultWithdrawerTest is Test {
         assertTrue(vault.authorizedWithdrawers(withdrawer2));
     }
 
-    // ============ WITHDRAWFROM FUNCTIONALITY TESTS ============
+    // ============ skimSurplus FUNCTIONALITY TESTS ============
 
-    function testWithdrawFromSuccess() public {
+    function testSkimSurplusSuccess() public {
         // Setup: authorize withdrawer and give client a balance with surplus
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 100e18);
@@ -141,14 +132,14 @@ contract VaultWithdrawerTest is Test {
         uint256 withdrawAmount = 100e18;
         uint256 recipientBalanceBefore = depositToken.balanceOf(recipient);
 
-        // Execute withdrawal
+        // Execute skim
         vm.expectEmit(true, true, true, true);
-        emit WithdrawnFrom(address(depositToken), client, withdrawer, withdrawAmount, recipient);
+        emit SurplusSkimmed(address(depositToken), client, withdrawer, withdrawAmount, recipient);
 
         vm.prank(withdrawer);
-        vault.withdrawFrom(address(depositToken), client, withdrawAmount, recipient);
+        vault.skimSurplus(address(depositToken), client, withdrawAmount, recipient);
 
-        // Verify balances - principal should stay at 1000e18, total should be 1000e18 (surplus withdrawn)
+        // Verify balances - principal should stay at 1000e18, total should be 1000e18 (surplus skimmed)
         assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
         // Allow for 1 wei rounding error
         assertApproxEqAbs(
@@ -159,7 +150,7 @@ contract VaultWithdrawerTest is Test {
         );
     }
 
-    function testWithdrawFromMultipleClients() public {
+    function testSkimSurplusMultipleClients() public {
         address client2 = address(0x6);
 
         vault.setWithdrawer(withdrawer, true);
@@ -169,48 +160,48 @@ contract VaultWithdrawerTest is Test {
         setupPrincipalAndSurplus(address(depositToken), client2, 2000e18, 400e18);
 
         vm.startPrank(withdrawer);
-        vault.withdrawFrom(address(depositToken), client, 100e18, recipient);
-        vault.withdrawFrom(address(depositToken), client2, 200e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
+        vault.skimSurplus(address(depositToken), client2, 200e18, recipient);
         vm.stopPrank();
 
-        // Verify balances - principal should remain, only surplus withdrawn
+        // Verify balances - principal should remain, only surplus skimmed
         assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
         assertEq(vault.balanceOf(address(depositToken), client2), 2000e18);
     }
 
-    function testWithdrawFromFullBalance() public {
+    function testSkimSurplusFullBalance() public {
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 1000e18);
 
         vm.prank(withdrawer);
-        vault.withdrawFrom(address(depositToken), client, 1000e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 1000e18, recipient);
 
-        // Verify balance - principal should remain at 1000e18, surplus fully withdrawn
+        // Verify balance - principal should remain at 1000e18, surplus fully skimmed
         assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
     }
 
-    function testWithdrawFromPartialAmount() public {
+    function testSkimSurplusPartialAmount() public {
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 1000e18);
 
         vm.prank(withdrawer);
-        vault.withdrawFrom(address(depositToken), client, 250e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 250e18, recipient);
 
-        // Verify balance - principal remains at 1000e18, partial surplus withdrawn (750e18 surplus left)
+        // Verify balance - principal remains at 1000e18, partial surplus skimmed (750e18 surplus left)
         assertEq(vault.totalBalanceOf(address(depositToken), client), 1750e18);
     }
 
     // ============ SECURITY TESTS ============
 
-    function testWithdrawFromUnauthorizedReverts() public {
+    function testSkimSurplusUnauthorizedReverts() public {
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 0);
 
         vm.prank(unauthorized);
         vm.expectRevert("AYieldStrategy: unauthorized, only authorized withdrawers");
-        vault.withdrawFrom(address(depositToken), client, 100e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
     }
 
-    function testWithdrawFromAfterDeauthorizationReverts() public {
+    function testSkimSurplusAfterDeauthorizationReverts() public {
         // Authorize then deauthorize
         vault.setWithdrawer(withdrawer, true);
         vault.setWithdrawer(withdrawer, false);
@@ -219,53 +210,53 @@ contract VaultWithdrawerTest is Test {
 
         vm.prank(withdrawer);
         vm.expectRevert("AYieldStrategy: unauthorized, only authorized withdrawers");
-        vault.withdrawFrom(address(depositToken), client, 100e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
     }
 
-    function testWithdrawFromInsufficientBalance() public {
+    function testSkimSurplusInsufficientBalance() public {
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 100e18, 0);
 
         vm.prank(withdrawer);
         vm.expectRevert("AYieldStrategy: insufficient client balance");
-        vault.withdrawFrom(address(depositToken), client, 200e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 200e18, recipient);
     }
 
-    function testWithdrawFromZeroToken() public {
+    function testSkimSurplusZeroToken() public {
         vault.setWithdrawer(withdrawer, true);
 
         vm.prank(withdrawer);
         vm.expectRevert("AYieldStrategy: token cannot be zero address");
-        vault.withdrawFrom(address(0), client, 100e18, recipient);
+        vault.skimSurplus(address(0), client, 100e18, recipient);
     }
 
-    function testWithdrawFromZeroClient() public {
+    function testSkimSurplusZeroClient() public {
         vault.setWithdrawer(withdrawer, true);
 
         vm.prank(withdrawer);
         vm.expectRevert("AYieldStrategy: client cannot be zero address");
-        vault.withdrawFrom(address(depositToken), address(0), 100e18, recipient);
+        vault.skimSurplus(address(depositToken), address(0), 100e18, recipient);
     }
 
-    function testWithdrawFromZeroRecipient() public {
+    function testSkimSurplusZeroRecipient() public {
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 0);
 
         vm.prank(withdrawer);
         vm.expectRevert("AYieldStrategy: recipient cannot be zero address");
-        vault.withdrawFrom(address(depositToken), client, 100e18, address(0));
+        vault.skimSurplus(address(depositToken), client, 100e18, address(0));
     }
 
-    function testWithdrawFromZeroAmount() public {
+    function testSkimSurplusZeroAmount() public {
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 0);
 
         vm.prank(withdrawer);
         vm.expectRevert("AYieldStrategy: amount must be greater than zero");
-        vault.withdrawFrom(address(depositToken), client, 0, recipient);
+        vault.skimSurplus(address(depositToken), client, 0, recipient);
     }
 
-    function testWithdrawFromNonOwnerCannotAuthorize() public {
+    function testSkimSurplusNonOwnerCannotAuthorize() public {
         vm.prank(unauthorized);
         vm.expectRevert();
         vault.setWithdrawer(withdrawer, true);
@@ -273,14 +264,14 @@ contract VaultWithdrawerTest is Test {
         assertFalse(vault.authorizedWithdrawers(withdrawer));
     }
 
-    function testWithdrawFromReentrancyProtection() public {
+    function testSkimSurplusReentrancyProtection() public {
         // The nonReentrant modifier should prevent reentrancy
         // This is implicitly tested through the modifier, but we verify the modifier is present
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 100e18);
 
         vm.prank(withdrawer);
-        vault.withdrawFrom(address(depositToken), client, 100e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
 
         // If reentrancy protection works, the transaction completes successfully
         assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
@@ -288,41 +279,41 @@ contract VaultWithdrawerTest is Test {
 
     // ============ EDGE CASE TESTS ============
 
-    function testWithdrawFromClientWithNoBalance() public {
+    function testSkimSurplusClientWithNoBalance() public {
         vault.setWithdrawer(withdrawer, true);
         // No balance set for client
 
         vm.prank(withdrawer);
         vm.expectRevert("AYieldStrategy: insufficient client balance");
-        vault.withdrawFrom(address(depositToken), client, 1e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 1e18, recipient);
     }
 
-    function testWithdrawFromSameClientMultipleTimes() public {
+    function testSkimSurplusSameClientMultipleTimes() public {
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 1000e18);
 
         vm.startPrank(withdrawer);
-        vault.withdrawFrom(address(depositToken), client, 100e18, recipient);
-        vault.withdrawFrom(address(depositToken), client, 200e18, recipient);
-        vault.withdrawFrom(address(depositToken), client, 300e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 200e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 300e18, recipient);
         vm.stopPrank();
 
-        // Verify balance - principal remains at 1000e18, 600e18 surplus withdrawn (400e18 surplus left)
+        // Verify balance - principal remains at 1000e18, 600e18 surplus skimmed (400e18 surplus left)
         assertEq(vault.totalBalanceOf(address(depositToken), client), 1400e18);
     }
 
-    function testWithdrawFromDifferentRecipients() public {
+    function testSkimSurplusDifferentRecipients() public {
         address recipient2 = address(0x7);
 
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 300e18);
 
         vm.startPrank(withdrawer);
-        vault.withdrawFrom(address(depositToken), client, 100e18, recipient);
-        vault.withdrawFrom(address(depositToken), client, 200e18, recipient2);
+        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
+        vault.skimSurplus(address(depositToken), client, 200e18, recipient2);
         vm.stopPrank();
 
-        // Allow for 2 wei total rounding error across both withdrawals
+        // Allow for 2 wei total rounding error across both skims
         assertApproxEqAbs(depositToken.balanceOf(recipient), 100e18, 2, "Recipient 1 balance within 2 wei");
         assertApproxEqAbs(depositToken.balanceOf(recipient2), 200e18, 2, "Recipient 2 balance within 2 wei");
     }

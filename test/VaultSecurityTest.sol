@@ -2,10 +2,9 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
+import "../src/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "./mocks/MockAutoPool.sol";
-import "../src/mocks/MockMainRewarder.sol";
+import "./mocks/MockERC4626Vault.sol";
 import "../src/AYieldStrategy.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -13,14 +12,12 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  * @title VaultSecurityTest
  * @notice Comprehensive test suite for Vault contract security features
  * @dev Tests all access control mechanisms, owner functions, and security edge cases
- * @dev Uses AutoPoolYieldStrategy (real implementation) with mocked external dependencies
+ * @dev Uses ERC4626YieldStrategy (real implementation) with a mock ERC4626 vault
  */
 contract VaultSecurityTest is Test {
-    AutoPoolYieldStrategy public vault;
+    ERC4626YieldStrategy public vault;
     MockERC20 public token;
-    MockERC20 public tokeToken;
-    MockAutoPool public autoPoolVault;
-    MockMainRewarder public mainRewarder;
+    MockERC4626Vault public erc4626Vault;
 
     address public owner = makeAddr("owner");
     address public user1 = makeAddr("user1");
@@ -31,23 +28,19 @@ contract VaultSecurityTest is Test {
     function setUp() public {
         // Deploy mock tokens
         token = new MockERC20("Test Token", "TEST", 18);
-        tokeToken = new MockERC20("TOKE", "TOKE", 18);
 
-        // Deploy mock external dependencies
-        mainRewarder = new MockMainRewarder(address(tokeToken));
-        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(token), address(mainRewarder));
+        // Deploy mock ERC4626 vault
+        erc4626Vault = new MockERC4626Vault("Vault Shares", "vTEST", address(token));
 
-        // Deploy the real AutoPoolYieldStrategy
-        vault = new AutoPoolYieldStrategy(
-            owner, address(token), address(tokeToken), address(autoPoolVault), address(mainRewarder)
-        );
+        // Deploy the real ERC4626YieldStrategy
+        vm.prank(owner);
+        vault = new ERC4626YieldStrategy(owner, address(token), address(erc4626Vault));
 
         // Setup initial tokens
         token.mint(user1, 1000000 * 1e18);
         token.mint(user2, 1000000 * 1e18);
         token.mint(attacker, 1000000 * 1e18);
         token.mint(bondingCurve, 10000000 * 1e18); // Give tokens to bonding curve for tests
-        token.mint(address(autoPoolVault), 10000000 * 1e18); // For autoPool mock
 
         // Set bonding curve address as authorized client
         vm.prank(owner);
@@ -73,9 +66,9 @@ contract VaultSecurityTest is Test {
         vault.deposit(address(token), principalAmount, bondingCurve);
         vm.stopPrank();
 
-        // Simulate yield by minting tokens to the autoPool vault
+        // Simulate yield in the ERC4626 vault to create surplus
         if (surplusAmount > 0) {
-            token.mint(address(autoPoolVault), surplusAmount);
+            erc4626Vault.simulateYield(surplusAmount);
         }
     }
 
@@ -251,11 +244,11 @@ contract VaultSecurityTest is Test {
         vm.startPrank(bondingCurve);
 
         // Zero amount should revert
-        vm.expectRevert("AutoPoolYieldStrategy: amount must be greater than zero");
+        vm.expectRevert("ERC4626YieldStrategy: amount must be greater than zero");
         vault.deposit(address(token), 0, user1);
 
         // Zero recipient address should revert
-        vm.expectRevert("AutoPoolYieldStrategy: recipient cannot be zero address");
+        vm.expectRevert("ERC4626YieldStrategy: recipient cannot be zero address");
         vault.deposit(address(token), amount, address(0));
 
         vm.stopPrank();
@@ -271,11 +264,11 @@ contract VaultSecurityTest is Test {
         vm.startPrank(bondingCurve);
 
         // Zero amount should revert
-        vm.expectRevert("AutoPoolYieldStrategy: amount must be greater than zero");
+        vm.expectRevert("ERC4626YieldStrategy: amount must be greater than zero");
         vault.withdraw(address(token), 0, user1);
 
         // Zero recipient address should revert
-        vm.expectRevert("AutoPoolYieldStrategy: recipient cannot be zero address");
+        vm.expectRevert("ERC4626YieldStrategy: recipient cannot be zero address");
         vault.withdraw(address(token), 500 * 1e18, address(0));
 
         vm.stopPrank();
@@ -337,8 +330,8 @@ contract VaultSecurityTest is Test {
         assertTrue(vault.authorizedClients(anotherClient));
     }
 
-    // Note: testMultipleTokensAccessControl removed - AutoPoolYieldStrategy is bound to a single token
-    // Multi-token support is not part of the AutoPoolYieldStrategy design
+    // Note: testMultipleTokensAccessControl removed - ERC4626YieldStrategy is bound to a single token
+    // Multi-token support is not part of the ERC4626YieldStrategy design
 
     // ============ EVENTS TESTING ============
 

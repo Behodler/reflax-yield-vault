@@ -2,21 +2,18 @@
 pragma solidity ^0.8.13;
 
 import "forge-std/Test.sol";
-import "../src/concreteYieldStrategies/AutoPoolYieldStrategy.sol";
+import "../src/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import "../src/mocks/MockERC20.sol";
-import "./mocks/MockAutoPool.sol";
-import "../src/mocks/MockMainRewarder.sol";
+import "./mocks/MockERC4626Vault.sol";
 
 /**
  * @title TotalWithdrawalTest
  * @notice Comprehensive tests for the two-phase totalWithdrawal function
  */
 contract TotalWithdrawalTest is Test {
-    AutoPoolYieldStrategy public vault;
+    ERC4626YieldStrategy public vault;
     MockERC20 public depositToken;
-    MockERC20 public tokeToken;
-    MockAutoPool public autoPoolVault;
-    MockMainRewarder public mainRewarder;
+    MockERC4626Vault public erc4626Vault;
 
     address public owner = address(1);
     address public client = address(2);
@@ -37,16 +34,13 @@ contract TotalWithdrawalTest is Test {
     function setUp() public {
         // Deploy mock tokens
         depositToken = new MockERC20("DOLA", "DOLA", 18);
-        tokeToken = new MockERC20("TOKE", "TOKE", 18);
 
-        // Deploy mock external dependencies
-        mainRewarder = new MockMainRewarder(address(tokeToken));
-        autoPoolVault = new MockAutoPool("AutoPool", "autoPool", address(depositToken), address(mainRewarder));
+        // Deploy mock ERC4626 vault
+        erc4626Vault = new MockERC4626Vault("Vault Shares", "vDOLA", address(depositToken));
 
-        // Deploy the real AutoPoolYieldStrategy
-        vault = new AutoPoolYieldStrategy(
-            owner, address(depositToken), address(tokeToken), address(autoPoolVault), address(mainRewarder)
-        );
+        // Deploy the real ERC4626YieldStrategy
+        vm.prank(owner);
+        vault = new ERC4626YieldStrategy(owner, address(depositToken), address(erc4626Vault));
 
         // Setup initial token balance and authorization
         depositToken.mint(client, DEPOSIT_AMOUNT);
@@ -63,7 +57,7 @@ contract TotalWithdrawalTest is Test {
 
         // Verify initial setup
         assertEq(vault.balanceOf(address(depositToken), client), DEPOSIT_AMOUNT);
-        assertEq(depositToken.balanceOf(address(autoPoolVault)), DEPOSIT_AMOUNT);
+        assertEq(depositToken.balanceOf(address(erc4626Vault)), DEPOSIT_AMOUNT);
     }
 
     // ============ ACCESS CONTROL TESTS ============
