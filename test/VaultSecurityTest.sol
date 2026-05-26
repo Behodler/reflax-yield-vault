@@ -166,6 +166,52 @@ contract VaultSecurityTest is Test {
         assertTrue(vault.authorizedClients(newClient));
     }
 
+    // ============ getAuthorizedClients() SET COVERAGE ============
+
+    function testGetAuthorizedClientsReflectsAddRemove() public {
+        address newClient = makeAddr("setClientA");
+        address newClient2 = makeAddr("setClientB");
+
+        uint256 baseCount = vault.authorizedClientCount();
+
+        // Add two clients
+        vm.startPrank(owner);
+        vault.setClient(newClient, true);
+        vault.setClient(newClient2, true);
+        vm.stopPrank();
+
+        assertEq(vault.authorizedClientCount(), baseCount + 2);
+        assertTrue(vault.authorizedClients(newClient));
+        assertTrue(vault.authorizedClients(newClient2));
+
+        // getAuthorizedClients() includes both newly-added members
+        address[] memory clients = vault.getAuthorizedClients();
+        bool foundA;
+        bool foundB;
+        for (uint256 i = 0; i < clients.length; i++) {
+            if (clients[i] == newClient) foundA = true;
+            if (clients[i] == newClient2) foundB = true;
+        }
+        assertTrue(foundA, "newClient in set");
+        assertTrue(foundB, "newClient2 in set");
+
+        // Idempotent add does not grow the set (M-01 dedup property)
+        vm.prank(owner);
+        vault.setClient(newClient, true);
+        assertEq(vault.authorizedClientCount(), baseCount + 2, "duplicate add is idempotent");
+
+        // Remove one client
+        vm.prank(owner);
+        vault.setClient(newClient, false);
+        assertEq(vault.authorizedClientCount(), baseCount + 1);
+        assertFalse(vault.authorizedClients(newClient));
+
+        clients = vault.getAuthorizedClients();
+        for (uint256 i = 0; i < clients.length; i++) {
+            assertTrue(clients[i] != newClient, "removed client absent from set");
+        }
+    }
+
     function testUnauthorizedSetClientReverts() public {
         address newClient = makeAddr("newClient");
 

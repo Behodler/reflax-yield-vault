@@ -82,24 +82,19 @@ interface IYieldStrategy {
     function totalWithdrawal(address token, address client) external;
 
     /**
-     * @notice Skim surplus (yield) from a client's balance to a specified recipient
+     * @notice Skim the full available surplus (yield) of every authorized client to one recipient
+     *         in a single underlying withdrawal. Always claims all clients (fairness); the strategy
+     *         owns the client set, so no client list is supplied by the caller. Principal untouched.
      * @param token The token address to skim
-     * @param client The client address whose surplus to skim
-     * @param amount The amount of surplus to skim
-     * @param recipient The address that will receive the skimmed tokens
-     * @dev Only authorized withdrawers can call this function. This only ever extracts surplus
-     *      yield; principal accounting is never touched.
+     * @param recipient The address that will receive all skimmed proceeds
+     * @dev Only authorized withdrawers can call this function. Snapshot semantics: every client's
+     *      surplus is read before any redemption. An empty client set is a no-op (no revert).
      */
-    function skimSurplus(address token, address client, uint256 amount, address recipient) external;
+    function skimSurplus(address token, address recipient) external;
 
     /**
-     * @notice Skim the full available surplus (yield) of multiple clients in a single underlying
-     *         withdrawal, all proceeds to one recipient. Snapshot semantics: every client's surplus
-     *         is read before any redemption (each gets a slice of the same pre-batch yield),
-     *         differing intentionally from N sequential skimSurplus calls. Principal untouched.
-     * @param token The token address to skim
-     * @param clients The client addresses whose full available surplus is skimmed
-     * @param recipient The address that will receive all skimmed proceeds
+     * @notice The set of clients the strategy will skim (and that may deposit/withdraw)
+     * @return The list of currently-authorized client addresses
      */
-    function skimSurplusBatch(address token, address[] calldata clients, address recipient) external;
+    function getAuthorizedClients() external view returns (address[] memory);
 }

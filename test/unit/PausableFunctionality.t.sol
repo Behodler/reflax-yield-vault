@@ -268,7 +268,7 @@ contract PausableFunctionalityTest is Test {
 
         // skimSurplus should work
         vm.prank(withdrawer);
-        vault.skimSurplus(address(underlyingToken), client, 500e18, withdrawer);
+        vault.skimSurplus(address(underlyingToken), withdrawer);
     }
 
     function testSkimSurplusRevertsWhenPaused() public {
@@ -288,7 +288,7 @@ contract PausableFunctionalityTest is Test {
         // skimSurplus should revert
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         vm.prank(withdrawer);
-        vault.skimSurplus(address(underlyingToken), client, 500e18, withdrawer);
+        vault.skimSurplus(address(underlyingToken), withdrawer);
     }
 
     // ============ whenNotPaused MODIFIER TESTS - totalWithdrawal() ============

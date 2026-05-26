@@ -463,8 +463,10 @@ contract ERC4626MarketYieldStrategyTest is Test {
     }
 
     // ============ SURPLUS WITHDRAWAL (skimSurplus) TESTS ============
+    // New model: skimSurplus(token, recipient) skims the FULL surplus of EVERY authorized client
+    // in a single AMM swap.
 
-    /// @notice Test skimSurplus only allows surplus extraction
+    /// @notice skimSurplus extracts surplus and never touches principal
     function testSkimSurplusOnlyAllowsSurplus() public {
         uint256 depositAmount = 10000e18;
 
@@ -474,85 +476,48 @@ contract ERC4626MarketYieldStrategyTest is Test {
         // Generate 10% yield
         erc4626Vault.simulateYield(1000e18);
 
-        uint256 principal = strategy.principalOf(address(underlyingToken), client);
-        uint256 totalBalance = strategy.totalBalanceOf(address(underlyingToken), client);
-        uint256 surplus = totalBalance - principal;
-
-        // Withdraw 50% of surplus
-        uint256 withdrawAmount = surplus / 2;
         vm.prank(withdrawer);
-        strategy.skimSurplus(address(underlyingToken), client, withdrawAmount, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
 
-        // Principal MUST NOT change
+        // Principal MUST NOT change; full surplus skimmed -> total ~= principal
         assertEq(strategy.principalOf(address(underlyingToken), client), depositAmount);
+        assertApproxEqAbs(strategy.totalBalanceOf(address(underlyingToken), client), depositAmount, 2);
     }
 
-    /// @notice Test skimSurplus reverts when amount exceeds surplus
-    function testSkimSurplusRevertsWhenExceedsSurplus() public {
-        uint256 depositAmount = 10000e18;
-
-        vm.prank(client);
-        strategy.deposit(address(underlyingToken), depositAmount, client);
-
-        // Generate small yield
-        erc4626Vault.simulateYield(100e18);
-
-        uint256 principal = strategy.principalOf(address(underlyingToken), client);
-        uint256 totalBalance = strategy.totalBalanceOf(address(underlyingToken), client);
-        uint256 surplus = totalBalance - principal;
-
-        // Attempt to withdraw more than surplus
-        vm.expectRevert(
-            "ERC4626MarketYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal"
-        );
-        vm.prank(withdrawer);
-        strategy.skimSurplus(address(underlyingToken), client, surplus + 50e18, withdrawer);
-    }
-
-    /// @notice Test skimSurplus never modifies principal
+    /// @notice skimSurplus never modifies principal across repeated calls
     function testSkimSurplusNeverModifiesPrincipal() public {
         uint256 depositAmount = 10000e18;
 
         vm.prank(client);
         strategy.deposit(address(underlyingToken), depositAmount, client);
 
-        erc4626Vault.simulateYield(1000e18);
-
         uint256 principalBefore = strategy.principalOf(address(underlyingToken), client);
 
-        // Multiple surplus withdrawals
+        // Repeated skims with fresh yield each round; principal stays constant
         for (uint256 i = 0; i < 5; i++) {
-            uint256 totalBalance = strategy.totalBalanceOf(address(underlyingToken), client);
-            uint256 principal = strategy.principalOf(address(underlyingToken), client);
-            uint256 surplus = totalBalance > principal ? totalBalance - principal : 0;
-
-            if (surplus > 10e18) {
-                uint256 withdrawAmount = surplus / 4;
-                vm.prank(withdrawer);
-                strategy.skimSurplus(address(underlyingToken), client, withdrawAmount, withdrawer);
-
-                // Principal MUST NOT change
-                assertEq(strategy.principalOf(address(underlyingToken), client), principalBefore);
-            }
+            erc4626Vault.simulateYield(200e18);
+            vm.prank(withdrawer);
+            strategy.skimSurplus(address(underlyingToken), withdrawer);
+            assertEq(strategy.principalOf(address(underlyingToken), client), principalBefore);
         }
 
-        // Final check
         assertEq(strategy.principalOf(address(underlyingToken), client), depositAmount);
     }
 
-    /// @notice Test skimSurplus reverts when there is no surplus
-    function testSkimSurplusRevertsWithNoSurplus() public {
+    /// @notice skimSurplus is a no-op (no swap) when there is no surplus
+    function testSkimSurplusNoSurplusNoOp() public {
         uint256 depositAmount = 10000e18;
 
         vm.prank(client);
         strategy.deposit(address(underlyingToken), depositAmount, client);
 
         // No yield generated
-        vm.expectRevert(
-            "ERC4626MarketYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal"
-        );
+        uint256 swapsBefore = ammAdapter.swapCount();
         vm.prank(withdrawer);
-        strategy.skimSurplus(address(underlyingToken), client, 1e18, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
+
+        assertEq(ammAdapter.swapCount() - swapsBefore, 0, "no surplus => no swap");
+        assertEq(strategy.principalOf(address(underlyingToken), client), depositAmount);
     }
 
     // ============ TOTAL WITHDRAWAL TWO-PHASE TESTS ============
@@ -792,19 +757,29 @@ contract ERC4626MarketYieldStrategyTest is Test {
         assertLt(received, 500e18);
     }
 
-    // ============ skimSurplusBatch TESTS ============
+    // ============ skimSurplus (all-clients, single-swap) TESTS ============
+    // The strategy owns the authorized-client set; skimSurplus iterates it internally.
 
     event SurplusSkimmed(
         address indexed token, address indexed client, address indexed withdrawer, uint256 amount, address recipient
     );
 
-    /// @notice Batch skim over multiple clients performs EXACTLY ONE swap, aggregated amountIn
-    function testSkimSurplusBatchSingleSwap() public {
-        vm.startPrank(client);
-        strategy.deposit(address(underlyingToken), 1000e18, user1);
-        strategy.deposit(address(underlyingToken), 2000e18, user2);
-        strategy.deposit(address(underlyingToken), 3000e18, user3);
+    /// @dev Authorize an address as a client and credit it with `amount` principal (deposit to self).
+    function _authorizeAndDeposit(address c, uint256 amount) internal {
+        vm.prank(owner);
+        strategy.setClient(c, true);
+        underlyingToken.mint(c, amount);
+        vm.startPrank(c);
+        underlyingToken.approve(address(strategy), type(uint256).max);
+        strategy.deposit(address(underlyingToken), amount, c);
         vm.stopPrank();
+    }
+
+    /// @notice Skim over multiple authorized clients performs EXACTLY ONE swap, aggregated amountIn
+    function testSkimSurplusSingleSwap() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        _authorizeAndDeposit(user2, 2000e18);
+        _authorizeAndDeposit(user3, 3000e18);
 
         // 10% yield on 6000 => 600 surplus
         erc4626Vault.simulateYield(600e18);
@@ -827,31 +802,25 @@ contract ERC4626MarketYieldStrategyTest is Test {
         uint256 swapsBefore = ammAdapter.swapCount();
 
         vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
 
-        // Exactly one swap for the whole batch
-        assertEq(ammAdapter.swapCount() - swapsBefore, 1, "batch must do exactly one swap");
+        // Exactly one swap for the whole client set
+        assertEq(ammAdapter.swapCount() - swapsBefore, 1, "skim must do exactly one swap");
         // amountIn proves aggregation across all clients
         assertEq(ammAdapter.lastAmountIn(), expectedShares, "swap amountIn == aggregated shares");
     }
 
-    /// @notice Batch skim leaves principal / getTotalDeposited unchanged
-    function testSkimSurplusBatchPrincipalUnchanged() public {
-        vm.startPrank(client);
-        strategy.deposit(address(underlyingToken), 1000e18, user1);
-        strategy.deposit(address(underlyingToken), 2000e18, user2);
-        vm.stopPrank();
+    /// @notice Skim leaves principal / getTotalDeposited unchanged
+    function testSkimSurplusAllClientsPrincipalUnchanged() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        _authorizeAndDeposit(user2, 2000e18);
 
         erc4626Vault.simulateYield(300e18);
 
         uint256 totalDepositedBefore = strategy.getTotalDeposited(address(underlyingToken));
 
-        address[] memory clients = new address[](2);
-        clients[0] = user1;
-        clients[1] = user2;
-
         vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
 
         assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
         assertEq(strategy.principalOf(address(underlyingToken), user2), 2000e18);
@@ -859,11 +828,9 @@ contract ERC4626MarketYieldStrategyTest is Test {
     }
 
     /// @notice One SurplusSkimmed event per surplus-bearing client
-    function testSkimSurplusBatchEmitsPerSurplusClient() public {
-        vm.startPrank(client);
-        strategy.deposit(address(underlyingToken), 1000e18, user1);
-        strategy.deposit(address(underlyingToken), 1000e18, user2);
-        vm.stopPrank();
+    function testSkimSurplusEmitsPerSurplusClient() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        _authorizeAndDeposit(user2, 1000e18);
 
         erc4626Vault.simulateYield(200e18);
 
@@ -872,62 +839,52 @@ contract ERC4626MarketYieldStrategyTest is Test {
         uint256 surplus2 = strategy.totalBalanceOf(address(underlyingToken), user2)
             - strategy.principalOf(address(underlyingToken), user2);
 
-        address[] memory clients = new address[](2);
-        clients[0] = user1;
-        clients[1] = user2;
-
+        // Iteration order: client (setUp, no principal -> skipped), user1, user2.
         vm.expectEmit(true, true, true, true);
         emit SurplusSkimmed(address(underlyingToken), user1, withdrawer, surplus1, withdrawer);
         vm.expectEmit(true, true, true, true);
         emit SurplusSkimmed(address(underlyingToken), user2, withdrawer, surplus2, withdrawer);
 
         vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
     }
 
-    /// @notice Zero-surplus clients are skipped (still one swap for the rest)
-    function testSkimSurplusBatchSkipsZeroSurplusClient() public {
-        vm.prank(client);
-        strategy.deposit(address(underlyingToken), 1000e18, user1);
+    /// @notice Zero-principal authorized clients are skipped (still one swap for the rest)
+    function testSkimSurplusSkipsZeroSurplusClient() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        // user2 and user3 authorized but never deposited => zero principal => skipped
+        vm.startPrank(owner);
+        strategy.setClient(user2, true);
+        strategy.setClient(user3, true);
+        vm.stopPrank();
 
         erc4626Vault.simulateYield(100e18);
-
-        address[] memory clients = new address[](3);
-        clients[0] = user1;
-        clients[1] = user2; // zero principal
-        clients[2] = user3; // zero principal
 
         uint256 swapsBefore = ammAdapter.swapCount();
 
         vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
 
         assertEq(ammAdapter.swapCount() - swapsBefore, 1, "one swap despite zero-surplus clients");
         assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
     }
 
     /// @notice No-op (no swap) when there is no surplus at all
-    function testSkimSurplusBatchNoSurplusNoSwap() public {
-        vm.prank(client);
-        strategy.deposit(address(underlyingToken), 1000e18, user1);
-
-        address[] memory clients = new address[](1);
-        clients[0] = user1;
+    function testSkimSurplusNoSurplusNoSwap() public {
+        _authorizeAndDeposit(user1, 1000e18);
 
         uint256 swapsBefore = ammAdapter.swapCount();
 
         vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
 
         assertEq(ammAdapter.swapCount() - swapsBefore, 0, "no swap when no surplus");
     }
 
-    /// @notice minOut is computed on the AGGREGATE: a sub-minOut AMM rate reverts the whole batch
-    function testSkimSurplusBatchMinOutOnAggregateReverts() public {
-        vm.startPrank(client);
-        strategy.deposit(address(underlyingToken), 1000e18, user1);
-        strategy.deposit(address(underlyingToken), 1000e18, user2);
-        vm.stopPrank();
+    /// @notice minOut is computed on the AGGREGATE: a sub-minOut AMM rate reverts the whole skim
+    function testSkimSurplusMinOutOnAggregateReverts() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        _authorizeAndDeposit(user2, 1000e18);
 
         erc4626Vault.simulateYield(400e18);
 
@@ -936,69 +893,36 @@ contract ERC4626MarketYieldStrategyTest is Test {
         strategy.setSlippageTolerance(10); // 0.1%
         ammAdapter.setExchangeRate(address(erc4626Vault), address(underlyingToken), 0.98e18); // 2% loss
 
-        address[] memory clients = new address[](2);
-        clients[0] = user1;
-        clients[1] = user2;
-
         vm.expectRevert("MockAMMAdapter: insufficient output amount");
         vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
     }
 
     // ---- guard / access cases ----
 
-    function testSkimSurplusBatchRevertsForNonWithdrawer() public {
-        address[] memory clients = new address[](1);
-        clients[0] = user1;
+    function testSkimSurplusRevertsForNonWithdrawer() public {
         vm.expectRevert("AYieldStrategy: unauthorized, only authorized withdrawers");
         vm.prank(randomUser);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
     }
 
-    function testSkimSurplusBatchRevertsWhenPaused() public {
-        address[] memory clients = new address[](1);
-        clients[0] = user1;
+    function testSkimSurplusRevertsWhenPaused() public {
         vm.prank(pauser);
         strategy.pause();
         vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
         vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
     }
 
-    function testSkimSurplusBatchRevertsZeroToken() public {
-        address[] memory clients = new address[](1);
-        clients[0] = user1;
+    function testSkimSurplusRevertsZeroToken() public {
         vm.expectRevert("AYieldStrategy: token cannot be zero address");
         vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(0), clients, withdrawer);
+        strategy.skimSurplus(address(0), withdrawer);
     }
 
-    function testSkimSurplusBatchRevertsZeroRecipient() public {
-        address[] memory clients = new address[](1);
-        clients[0] = user1;
+    function testSkimSurplusRevertsZeroRecipient() public {
         vm.expectRevert("AYieldStrategy: recipient cannot be zero address");
         vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, address(0));
-    }
-
-    function testSkimSurplusBatchRevertsEmptyClients() public {
-        address[] memory clients = new address[](0);
-        vm.expectRevert("AYieldStrategy: empty clients");
-        vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
-    }
-
-    function testSkimSurplusBatchRevertsZeroAddressClientEntry() public {
-        vm.prank(client);
-        strategy.deposit(address(underlyingToken), 1000e18, user1);
-        erc4626Vault.simulateYield(100e18);
-
-        address[] memory clients = new address[](2);
-        clients[0] = user1;
-        clients[1] = address(0);
-
-        vm.expectRevert("ERC4626MarketYieldStrategy: client cannot be zero address");
-        vm.prank(withdrawer);
-        strategy.skimSurplusBatch(address(underlyingToken), clients, withdrawer);
+        strategy.skimSurplus(address(underlyingToken), address(0));
     }
 }

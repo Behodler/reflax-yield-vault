@@ -399,67 +399,18 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
     }
 
     /**
-     * @notice Internal skimSurplus implementation for authorized surplus extraction
+     * @notice Skim the full available surplus of every authorized client in a SINGLE AMM swap
      * @param token The token address (must be underlying token)
-     * @param client The client address whose surplus to skim
-     * @param amount The amount to skim (MUST be <= available surplus)
-     * @param recipient The address that will receive the skimmed tokens
-     * @dev Allows authorized withdrawers to extract surplus (yield) without touching principal.
-     *      CRITICAL: Principal tracking (clientBalances) is NEVER modified by this function.
-     *      Only surplus/yield can be skimmed.
-     */
-    function _skimSurplus(address token, address client, uint256 amount, address recipient) internal override {
-        require(token == address(underlyingToken), "ERC4626MarketYieldStrategy: only underlying token supported");
-
-        // Get current balances
-        uint256 principal = clientBalances[token][client];
-        uint256 totalBalance = this.totalBalanceOf(token, client);
-
-        // Calculate available surplus (yield)
-        uint256 surplus = totalBalance > principal ? totalBalance - principal : 0;
-
-        // CRITICAL: skimSurplus is ONLY for surplus extraction
-        require(
-            amount <= surplus,
-            "ERC4626MarketYieldStrategy: amount exceeds available surplus, use totalWithdrawal() for principal"
-        );
-
-        // Convert requested amount to shares, cap to available shares
-        uint256 sharesToSell = vault.convertToShares(amount);
-        uint256 availableShares = vault.balanceOf(address(this));
-        if (sharesToSell > availableShares) {
-            sharesToSell = availableShares;
-        }
-
-        // Calculate minimum output with slippage tolerance
-        uint256 idealUnderlying = vault.convertToAssets(sharesToSell);
-        uint256 minOut = idealUnderlying * (MAX_BPS - slippageToleranceBps) / MAX_BPS;
-
-        // Approve AMM adapter to spend vault tokens
-        IERC20(address(vault)).safeIncreaseAllowance(address(ammAdapter), sharesToSell);
-
-        // Swap vault tokens -> underlying via AMM
-        uint256 underlyingReceived = ammAdapter.swap(address(vault), address(underlyingToken), sharesToSell, minOut);
-
-        // Transfer to recipient
-        underlyingToken.safeTransfer(recipient, underlyingReceived);
-
-        // CORRECT: NEVER modify principal tracking for surplus withdrawals
-        // clientBalances[token][client] stays unchanged
-        // totalDeposited[token] stays unchanged
-        // Only vault shares are reduced, affecting totalBalanceOf() but not principalOf()
-    }
-
-    /**
-     * @notice Batch skim the full available surplus of multiple clients in a single AMM swap
-     * @param token The token address (must be underlying token)
-     * @param clients The client addresses whose full available surplus is skimmed
+     * @param clients The client addresses (the strategy's authorized set) whose surplus is skimmed
      * @param recipient The address that will receive all skimmed proceeds
      * @dev Snapshots total value once, sums per-client FLOORED shares (protocol-favoring rounding),
      *      and performs a SINGLE ammAdapter.swap with minOut computed on the aggregate.
-     *      Principal accounting is left untouched.
+     *      Principal accounting is left untouched. The aggregate-surplus require (audit M-01
+     *      mitigation) replaces the old silent clamp: it fails LOUDLY rather than over-selling.
+     *      The EnumerableSet of clients already guarantees distinctness, so this require is
+     *      defense-in-depth.
      */
-    function _skimSurplusBatch(address token, address[] calldata clients, address recipient) internal override {
+    function _skimSurplus(address token, address[] memory clients, address recipient) internal override {
         require(token == address(underlyingToken), "ERC4626MarketYieldStrategy: only underlying token supported");
         uint256 td = totalDeposited[token];
         if (td == 0) return;
@@ -477,13 +428,15 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
             emit SurplusSkimmed(token, client, msg.sender, surplus, recipient);
         }
         if (totalShares == 0) return;
-        uint256 availableShares = vault.balanceOf(address(this));
-        if (totalShares > availableShares) totalShares = availableShares;
+        // Loud aggregate-surplus ceiling (audit M-01): never sell beyond the protocol's surplus.
+        uint256 aggregateSurplus = totalValue > td ? totalValue - td : 0;
+        uint256 maxSurplusShares = vault.convertToShares(aggregateSurplus);
+        require(totalShares <= maxSurplusShares, "ERC4626MarketYieldStrategy: skim exceeds aggregate surplus");
         uint256 idealUnderlying = vault.convertToAssets(totalShares);
         uint256 minOut = idealUnderlying * (MAX_BPS - slippageToleranceBps) / MAX_BPS;
         IERC20(address(vault)).safeIncreaseAllowance(address(ammAdapter), totalShares);
         uint256 underlyingReceived = ammAdapter.swap(address(vault), address(underlyingToken), totalShares, minOut); // SINGLE swap
         underlyingToken.safeTransfer(recipient, underlyingReceived);
-        // Principal tracking intentionally untouched (surplus-only), as in _skimSurplus.
+        // Principal tracking intentionally untouched (surplus-only).
     }
 }

@@ -123,34 +123,35 @@ contract VaultWithdrawerTest is Test {
     }
 
     // ============ skimSurplus FUNCTIONALITY TESTS ============
+    // New model: skimSurplus(token, recipient) always skims the FULL surplus of EVERY
+    // currently-authorized client in a single redeem. No caller-supplied client/amount.
 
     function testSkimSurplusSuccess() public {
         // Setup: authorize withdrawer and give client a balance with surplus
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 100e18);
 
-        uint256 withdrawAmount = 100e18;
+        uint256 surplus =
+            vault.totalBalanceOf(address(depositToken), client) - vault.principalOf(address(depositToken), client);
         uint256 recipientBalanceBefore = depositToken.balanceOf(recipient);
 
-        // Execute skim
+        // Execute skim — emits one SurplusSkimmed for the (only) surplus-bearing client
         vm.expectEmit(true, true, true, true);
-        emit SurplusSkimmed(address(depositToken), client, withdrawer, withdrawAmount, recipient);
+        emit SurplusSkimmed(address(depositToken), client, withdrawer, surplus, recipient);
 
         vm.prank(withdrawer);
-        vault.skimSurplus(address(depositToken), client, withdrawAmount, recipient);
+        vault.skimSurplus(address(depositToken), recipient);
 
-        // Verify balances - principal should stay at 1000e18, total should be 1000e18 (surplus skimmed)
+        // Principal unchanged at 1000e18; full surplus (~100e18) sent to recipient
         assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
-        // Allow for 1 wei rounding error
         assertApproxEqAbs(
-            depositToken.balanceOf(recipient),
-            recipientBalanceBefore + withdrawAmount,
-            1,
-            "Recipient balance within 1 wei"
+            depositToken.balanceOf(recipient), recipientBalanceBefore + surplus, 1, "Recipient gets full surplus"
         );
+        // After skimming all surplus, total balance ~= principal
+        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client), 1000e18, 2);
     }
 
-    function testSkimSurplusMultipleClients() public {
+    function testSkimSurplusAllAuthorizedClients() public {
         address client2 = address(0x6);
 
         vault.setWithdrawer(withdrawer, true);
@@ -159,50 +160,172 @@ contract VaultWithdrawerTest is Test {
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 100e18);
         setupPrincipalAndSurplus(address(depositToken), client2, 2000e18, 400e18);
 
-        vm.startPrank(withdrawer);
-        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
-        vault.skimSurplus(address(depositToken), client2, 200e18, recipient);
-        vm.stopPrank();
+        // ONE call skims BOTH clients in a single redeem
+        uint256 redeemsBefore = erc4626Vault.redeemCount();
+        vm.prank(withdrawer);
+        vault.skimSurplus(address(depositToken), recipient);
+        assertEq(erc4626Vault.redeemCount() - redeemsBefore, 1, "exactly one redeem for all clients");
 
-        // Verify balances - principal should remain, only surplus skimmed
+        // Both principals untouched
         assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
         assertEq(vault.balanceOf(address(depositToken), client2), 2000e18);
+
+        // Both clients' surplus skimmed -> totals back to principal
+        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client), 1000e18, 2);
+        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client2), 2000e18, 2);
     }
 
-    function testSkimSurplusFullBalance() public {
+    function testSkimSurplusSingleClientFullSurplus() public {
+        // Only one authorized client (length-1 set is just the array-length-1 case)
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 1000e18);
 
         vm.prank(withdrawer);
-        vault.skimSurplus(address(depositToken), client, 1000e18, recipient);
+        vault.skimSurplus(address(depositToken), recipient);
 
-        // Verify balance - principal should remain at 1000e18, surplus fully skimmed
+        // Principal stays at 1000e18, full surplus skimmed -> total ~= principal
         assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
+        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client), 1000e18, 2);
     }
 
-    function testSkimSurplusPartialAmount() public {
+    function testSkimSurplusPrincipalUntouched() public {
         vault.setWithdrawer(withdrawer, true);
-        setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 1000e18);
+        setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 500e18);
+
+        uint256 totalDepositedBefore = vault.getTotalDeposited(address(depositToken));
 
         vm.prank(withdrawer);
-        vault.skimSurplus(address(depositToken), client, 250e18, recipient);
+        vault.skimSurplus(address(depositToken), recipient);
 
-        // Verify balance - principal remains at 1000e18, partial surplus skimmed (750e18 surplus left)
-        assertEq(vault.totalBalanceOf(address(depositToken), client), 1750e18);
+        assertEq(vault.principalOf(address(depositToken), client), 1000e18);
+        assertEq(vault.getTotalDeposited(address(depositToken)), totalDepositedBefore);
     }
 
-    // ============ SECURITY TESTS ============
+    function testSkimSurplusExcludesDeauthorizedClient() public {
+        address client2 = address(0x6);
+
+        vault.setWithdrawer(withdrawer, true);
+        vault.setClient(client2, true);
+
+        setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 100e18);
+        setupPrincipalAndSurplus(address(depositToken), client2, 1000e18, 100e18);
+
+        // De-authorize client2 — it is no longer in the skim set
+        vault.setClient(client2, false);
+
+        // Only client's surplus is emitted/skimmed; client2 is excluded
+        uint256 surplus1 =
+            vault.totalBalanceOf(address(depositToken), client) - vault.principalOf(address(depositToken), client);
+
+        vm.expectEmit(true, true, true, true);
+        emit SurplusSkimmed(address(depositToken), client, withdrawer, surplus1, recipient);
+
+        vm.prank(withdrawer);
+        vault.skimSurplus(address(depositToken), recipient);
+
+        // client2's principal and surplus remain in the strategy (recoverable via totalWithdrawal)
+        assertEq(vault.principalOf(address(depositToken), client2), 1000e18);
+        assertGt(vault.totalBalanceOf(address(depositToken), client2), 1000e18);
+    }
+
+    function testSkimSurplusIncludesNewlyAuthorizedClient() public {
+        address client2 = address(0x6);
+
+        vault.setWithdrawer(withdrawer, true);
+        setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 100e18);
+
+        // Authorize client2 AFTER client, then give it principal + surplus
+        vault.setClient(client2, true);
+        setupPrincipalAndSurplus(address(depositToken), client2, 1000e18, 100e18);
+
+        uint256 redeemsBefore = erc4626Vault.redeemCount();
+        vm.prank(withdrawer);
+        vault.skimSurplus(address(depositToken), recipient);
+
+        // Single redeem covers both, including the newly-authorized client2
+        assertEq(erc4626Vault.redeemCount() - redeemsBefore, 1, "one redeem for both clients");
+        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client2), 1000e18, 2);
+    }
+
+    function testSkimSurplusEmptyClientSetIsNoOp() public {
+        // Fresh strategy with NO authorized clients
+        ERC4626YieldStrategy emptyVault = new ERC4626YieldStrategy(owner, address(depositToken), address(erc4626Vault));
+        emptyVault.setWithdrawer(withdrawer, true);
+
+        uint256 redeemsBefore = erc4626Vault.redeemCount();
+
+        // Must NOT revert despite empty client set
+        vm.prank(withdrawer);
+        emptyVault.skimSurplus(address(depositToken), recipient);
+
+        // No-op: no redeem performed
+        assertEq(erc4626Vault.redeemCount() - redeemsBefore, 0, "empty client set => no redeem");
+    }
+
+    function testSkimSurplusNoSurplusIsNoOp() public {
+        // Authorized client with principal but zero yield
+        vault.setWithdrawer(withdrawer, true);
+        setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 0);
+
+        uint256 redeemsBefore = erc4626Vault.redeemCount();
+
+        vm.prank(withdrawer);
+        vault.skimSurplus(address(depositToken), recipient);
+
+        assertEq(erc4626Vault.redeemCount() - redeemsBefore, 0, "no surplus => no redeem");
+        assertEq(vault.principalOf(address(depositToken), client), 1000e18);
+    }
+
+    // ============ M-01 REGRESSION TEST ============
+
+    /// @notice Calling setClient(c, true) twice must NOT cause a 2x over-skim.
+    ///         The EnumerableSet dedupes, so the client appears exactly once in the skim set.
+    function testSkimSurplusIdempotentSetNoOverSkim() public {
+        vault.setWithdrawer(withdrawer, true);
+
+        // Authorize the same client twice (idempotent on the set)
+        vault.setClient(client, true);
+        vault.setClient(client, true);
+
+        // The set contains the client exactly once
+        assertEq(vault.authorizedClientCount(), 1, "duplicate setClient does not grow the set");
+        address[] memory clients = vault.getAuthorizedClients();
+        assertEq(clients.length, 1, "set has one distinct client");
+        assertEq(clients[0], client);
+
+        setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 200e18);
+
+        uint256 trueSurplus =
+            vault.totalBalanceOf(address(depositToken), client) - vault.principalOf(address(depositToken), client);
+        uint256 recipientBefore = depositToken.balanceOf(recipient);
+
+        vm.prank(withdrawer);
+        vault.skimSurplus(address(depositToken), recipient);
+
+        uint256 received = depositToken.balanceOf(recipient) - recipientBefore;
+
+        // Skimmed amount ~= true aggregate surplus, NOT 2x (would be ~400e18 if duplicated)
+        assertApproxEqAbs(received, trueSurplus, 2, "skim equals true surplus, not 2x");
+        assertLe(received, trueSurplus + 1, "never exceeds true surplus");
+
+        // Principal still fully backed: held-share value >= recorded principal (no under-backing)
+        uint256 heldShares = erc4626Vault.balanceOf(address(vault));
+        uint256 heldValue = erc4626Vault.convertToAssets(heldShares);
+        assertGe(heldValue, vault.principalOf(address(depositToken), client), "principal still backed");
+    }
+
+    // ============ SECURITY / GUARD TESTS ============
 
     function testSkimSurplusUnauthorizedReverts() public {
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 0);
 
         vm.prank(unauthorized);
         vm.expectRevert("AYieldStrategy: unauthorized, only authorized withdrawers");
-        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
+        vault.skimSurplus(address(depositToken), recipient);
     }
 
     function testSkimSurplusAfterDeauthorizationReverts() public {
-        // Authorize then deauthorize
+        // Authorize then deauthorize the withdrawer
         vault.setWithdrawer(withdrawer, true);
         vault.setWithdrawer(withdrawer, false);
 
@@ -210,16 +333,7 @@ contract VaultWithdrawerTest is Test {
 
         vm.prank(withdrawer);
         vm.expectRevert("AYieldStrategy: unauthorized, only authorized withdrawers");
-        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
-    }
-
-    function testSkimSurplusInsufficientBalance() public {
-        vault.setWithdrawer(withdrawer, true);
-        setupPrincipalAndSurplus(address(depositToken), client, 100e18, 0);
-
-        vm.prank(withdrawer);
-        vm.expectRevert("AYieldStrategy: insufficient client balance");
-        vault.skimSurplus(address(depositToken), client, 200e18, recipient);
+        vault.skimSurplus(address(depositToken), recipient);
     }
 
     function testSkimSurplusZeroToken() public {
@@ -227,15 +341,7 @@ contract VaultWithdrawerTest is Test {
 
         vm.prank(withdrawer);
         vm.expectRevert("AYieldStrategy: token cannot be zero address");
-        vault.skimSurplus(address(0), client, 100e18, recipient);
-    }
-
-    function testSkimSurplusZeroClient() public {
-        vault.setWithdrawer(withdrawer, true);
-
-        vm.prank(withdrawer);
-        vm.expectRevert("AYieldStrategy: client cannot be zero address");
-        vault.skimSurplus(address(depositToken), address(0), 100e18, recipient);
+        vault.skimSurplus(address(0), recipient);
     }
 
     function testSkimSurplusZeroRecipient() public {
@@ -244,16 +350,7 @@ contract VaultWithdrawerTest is Test {
 
         vm.prank(withdrawer);
         vm.expectRevert("AYieldStrategy: recipient cannot be zero address");
-        vault.skimSurplus(address(depositToken), client, 100e18, address(0));
-    }
-
-    function testSkimSurplusZeroAmount() public {
-        vault.setWithdrawer(withdrawer, true);
-        setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 0);
-
-        vm.prank(withdrawer);
-        vm.expectRevert("AYieldStrategy: amount must be greater than zero");
-        vault.skimSurplus(address(depositToken), client, 0, recipient);
+        vault.skimSurplus(address(depositToken), address(0));
     }
 
     function testSkimSurplusNonOwnerCannotAuthorize() public {
@@ -265,42 +362,17 @@ contract VaultWithdrawerTest is Test {
     }
 
     function testSkimSurplusReentrancyProtection() public {
-        // The nonReentrant modifier should prevent reentrancy
-        // This is implicitly tested through the modifier, but we verify the modifier is present
+        // The nonReentrant modifier should prevent reentrancy. Verify a normal call completes.
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 100e18);
 
         vm.prank(withdrawer);
-        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
+        vault.skimSurplus(address(depositToken), recipient);
 
-        // If reentrancy protection works, the transaction completes successfully
         assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
     }
 
     // ============ EDGE CASE TESTS ============
-
-    function testSkimSurplusClientWithNoBalance() public {
-        vault.setWithdrawer(withdrawer, true);
-        // No balance set for client
-
-        vm.prank(withdrawer);
-        vm.expectRevert("AYieldStrategy: insufficient client balance");
-        vault.skimSurplus(address(depositToken), client, 1e18, recipient);
-    }
-
-    function testSkimSurplusSameClientMultipleTimes() public {
-        vault.setWithdrawer(withdrawer, true);
-        setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 1000e18);
-
-        vm.startPrank(withdrawer);
-        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
-        vault.skimSurplus(address(depositToken), client, 200e18, recipient);
-        vault.skimSurplus(address(depositToken), client, 300e18, recipient);
-        vm.stopPrank();
-
-        // Verify balance - principal remains at 1000e18, 600e18 surplus skimmed (400e18 surplus left)
-        assertEq(vault.totalBalanceOf(address(depositToken), client), 1400e18);
-    }
 
     function testSkimSurplusDifferentRecipients() public {
         address recipient2 = address(0x7);
@@ -308,14 +380,17 @@ contract VaultWithdrawerTest is Test {
         vault.setWithdrawer(withdrawer, true);
         setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 300e18);
 
-        vm.startPrank(withdrawer);
-        vault.skimSurplus(address(depositToken), client, 100e18, recipient);
-        vault.skimSurplus(address(depositToken), client, 200e18, recipient2);
-        vm.stopPrank();
+        // First skim sends full surplus to recipient
+        vm.prank(withdrawer);
+        vault.skimSurplus(address(depositToken), recipient);
+        assertApproxEqAbs(depositToken.balanceOf(recipient), 300e18, 2, "Recipient 1 gets full surplus");
 
-        // Allow for 2 wei total rounding error across both skims
-        assertApproxEqAbs(depositToken.balanceOf(recipient), 100e18, 2, "Recipient 1 balance within 2 wei");
-        assertApproxEqAbs(depositToken.balanceOf(recipient2), 200e18, 2, "Recipient 2 balance within 2 wei");
+        // After the first skim there is no surplus left; a second skim to recipient2 is a no-op
+        uint256 redeemsBefore = erc4626Vault.redeemCount();
+        vm.prank(withdrawer);
+        vault.skimSurplus(address(depositToken), recipient2);
+        assertEq(erc4626Vault.redeemCount() - redeemsBefore, 0, "no surplus left => no-op");
+        assertEq(depositToken.balanceOf(recipient2), 0, "Recipient 2 gets nothing");
     }
 
     // ============ AUTHORIZATION CHANGE TESTS ============

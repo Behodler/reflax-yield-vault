@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 /**
  * @title AYieldStrategy
@@ -15,13 +16,17 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
  *      Implements IPausable for integration with the Global Pauser contract.
  */
 abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, ReentrancyGuard, Pausable {
+    using EnumerableSet for EnumerableSet.AddressSet;
+
     // ============ STATE VARIABLES ============
 
     /// @notice The authorized pauser address that can pause this contract
     address private _pauser;
 
-    /// @notice Mapping of addresses authorized to deposit/withdraw
-    mapping(address => bool) public authorizedClients;
+    /// @notice Set of addresses authorized to deposit/withdraw AND skimmed by skimSurplus.
+    ///         An EnumerableSet gives O(1) membership (like the old mapping) plus enumeration,
+    ///         and guarantees distinctness so skimSurplus can never over-skim (audit M-01).
+    EnumerableSet.AddressSet private _authorizedClients;
 
     /// @notice Mapping of addresses authorized to withdraw on behalf of clients
     mapping(address => bool) public authorizedWithdrawers;
@@ -119,7 +124,7 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
      * @dev Reverts if the caller is not an authorized client address
      */
     modifier onlyAuthorizedClient() {
-        require(authorizedClients[msg.sender], "AYieldStrategy: unauthorized, only authorized clients");
+        require(_authorizedClients.contains(msg.sender), "AYieldStrategy: unauthorized, only authorized clients");
         _;
     }
 
@@ -162,9 +167,39 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     function setClient(address client, bool _auth) external override onlyOwner {
         require(client != address(0), "AYieldStrategy: client cannot be zero address");
 
-        authorizedClients[client] = _auth;
+        if (_auth) {
+            _authorizedClients.add(client); // idempotent — no duplicates possible
+        } else {
+            _authorizedClients.remove(client);
+        }
 
         emit ClientAuthorizationSet(client, _auth);
+    }
+
+    /**
+     * @notice Backward-compatible client-authorization membership getter
+     * @param client The client address to check
+     * @return True if the client is currently authorized
+     * @dev Preserves the ABI shape of the former `mapping(address => bool) public authorizedClients`.
+     */
+    function authorizedClients(address client) external view returns (bool) {
+        return _authorizedClients.contains(client);
+    }
+
+    /**
+     * @notice Enumerate all currently-authorized clients (the skim target set)
+     * @return The list of authorized client addresses
+     */
+    function getAuthorizedClients() external view override returns (address[] memory) {
+        return _authorizedClients.values();
+    }
+
+    /**
+     * @notice The number of currently-authorized clients
+     * @return The size of the authorized-client set
+     */
+    function authorizedClientCount() external view returns (uint256) {
+        return _authorizedClients.length();
     }
 
     /**
@@ -270,44 +305,16 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     }
 
     /**
-     * @notice Skim surplus (yield) from a client's balance to a specified recipient
+     * @notice Skim the FULL available surplus of EVERY currently-authorized client to one recipient,
+     *         in a single underlying redeem/swap. Always all-or-nothing (fairness).
      * @param token The token address to skim
-     * @param client The client address whose surplus to skim
-     * @param amount The amount of surplus to skim
-     * @param recipient The address that will receive the skimmed tokens
-     * @dev Only authorized withdrawers can call this function. This is used to extract surplus yield.
-     */
-    function skimSurplus(address token, address client, uint256 amount, address recipient)
-        external
-        onlyAuthorizedWithdrawer
-        nonReentrant
-        whenNotPaused
-    {
-        require(token != address(0), "AYieldStrategy: token cannot be zero address");
-        require(client != address(0), "AYieldStrategy: client cannot be zero address");
-        require(recipient != address(0), "AYieldStrategy: recipient cannot be zero address");
-        require(amount > 0, "AYieldStrategy: amount must be greater than zero");
-
-        // Check that client has sufficient balance
-        uint256 clientBalance = this.balanceOf(token, client);
-        require(clientBalance >= amount, "AYieldStrategy: insufficient client balance");
-
-        // Perform the skim through the virtual function
-        _skimSurplus(token, client, amount, recipient);
-
-        emit SurplusSkimmed(token, client, msg.sender, amount, recipient);
-    }
-
-    /**
-     * @notice Skim the full available surplus of multiple clients in a single underlying op
-     * @param token The token address to skim
-     * @param clients The client addresses whose full available surplus is skimmed
      * @param recipient The address that will receive all skimmed proceeds
-     * @dev Only authorized withdrawers can call this function. Concrete strategies override
-     *      _skimSurplusBatch to collapse the batch into a single redeem/swap. Snapshot semantics:
-     *      every client's surplus is read before any redemption. Principal accounting untouched.
+     * @dev Only authorized withdrawers can call this function. The strategy owns the client set, so
+     *      no client list is supplied by the caller — this structurally closes the duplicate-driven
+     *      over-skim vector (audit M-01). Snapshot semantics; principal accounting untouched.
+     *      An empty client set is a no-op (no revert) so keepers/schedulers never fail spuriously.
      */
-    function skimSurplusBatch(address token, address[] calldata clients, address recipient)
+    function skimSurplus(address token, address recipient)
         external
         onlyAuthorizedWithdrawer
         nonReentrant
@@ -315,8 +322,7 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     {
         require(token != address(0), "AYieldStrategy: token cannot be zero address");
         require(recipient != address(0), "AYieldStrategy: recipient cannot be zero address");
-        require(clients.length > 0, "AYieldStrategy: empty clients");
-        _skimSurplusBatch(token, clients, recipient);
+        _skimSurplus(token, _authorizedClients.values(), recipient);
     }
 
     // ============ VIRTUAL FUNCTIONS ============
@@ -340,23 +346,14 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     /**
      * @notice Internal skimSurplus implementation to be overridden by concrete contracts
      * @param token The token address to skim
-     * @param client The client address whose surplus to skim
-     * @param amount The amount of surplus to skim
-     * @param recipient The address that will receive the skimmed tokens
-     * @dev Must be implemented by concrete vault contracts to define skimSurplus logic
-     */
-    function _skimSurplus(address token, address client, uint256 amount, address recipient) internal virtual;
-
-    /**
-     * @notice Internal batch skim implementation to be overridden by concrete contracts
-     * @param token The token address to skim
-     * @param clients The client addresses whose full available surplus is skimmed
+     * @param clients The client addresses (the strategy's authorized set) whose full available
+     *        surplus is skimmed
      * @param recipient The address that will receive all skimmed proceeds
-     * @dev Abstract: each concrete strategy collapses the batch into a single redeem/swap.
-     *      Snapshots total value once, sums per-client floored shares, leaves principal untouched,
-     *      and emits one SurplusSkimmed per surplus-bearing client.
+     * @dev Abstract: each concrete strategy collapses the client set into a SINGLE redeem/swap.
+     *      Snapshots total value once, sums per-client floored shares (protocol-favoring rounding),
+     *      leaves principal untouched, and emits one SurplusSkimmed per surplus-bearing client.
      */
-    function _skimSurplusBatch(address token, address[] calldata clients, address recipient) internal virtual;
+    function _skimSurplus(address token, address[] memory clients, address recipient) internal virtual;
 
     // ============ VIRTUAL FUNCTIONS ============
 
