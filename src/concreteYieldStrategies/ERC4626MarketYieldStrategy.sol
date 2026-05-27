@@ -410,10 +410,14 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
      *      The EnumerableSet of clients already guarantees distinctness, so this require is
      *      defense-in-depth.
      */
-    function _skimSurplus(address token, address[] memory clients, address recipient) internal override {
+    function _skimSurplus(address token, address[] memory clients, address recipient)
+        internal
+        override
+        returns (uint256 underlyingReceived)
+    {
         require(token == address(underlyingToken), "ERC4626MarketYieldStrategy: only underlying token supported");
         uint256 td = totalDeposited[token];
-        if (td == 0) return;
+        if (td == 0) return 0;
         uint256 totalValue = vault.convertToAssets(vault.balanceOf(address(this))); // snapshot
         uint256 totalShares;
         for (uint256 i = 0; i < clients.length; i++) {
@@ -427,7 +431,7 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
             totalShares += vault.convertToShares(surplus); // per-client floor (protocol-favoring)
             emit SurplusSkimmed(token, client, msg.sender, surplus, recipient);
         }
-        if (totalShares == 0) return;
+        if (totalShares == 0) return 0;
         // Loud aggregate-surplus ceiling (audit M-01): never sell beyond the protocol's surplus.
         uint256 aggregateSurplus = totalValue > td ? totalValue - td : 0;
         uint256 maxSurplusShares = vault.convertToShares(aggregateSurplus);
@@ -435,7 +439,10 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         uint256 idealUnderlying = vault.convertToAssets(totalShares);
         uint256 minOut = idealUnderlying * (MAX_BPS - slippageToleranceBps) / MAX_BPS;
         IERC20(address(vault)).safeIncreaseAllowance(address(ammAdapter), totalShares);
-        uint256 underlyingReceived = ammAdapter.swap(address(vault), address(underlyingToken), totalShares, minOut); // SINGLE swap
+        // Return the ACTUAL underlying delivered to `recipient` (real post-swap output) so the caller can
+        // bubble it up. This is net of AMM price/slippage and so will generally differ from the
+        // SurplusSkimmed snapshot sum (vault-asset terms) — see CLAUDE.md.
+        underlyingReceived = ammAdapter.swap(address(vault), address(underlyingToken), totalShares, minOut); // SINGLE swap
         underlyingToken.safeTransfer(recipient, underlyingReceived);
         // Principal tracking intentionally untouched (surplus-only).
     }

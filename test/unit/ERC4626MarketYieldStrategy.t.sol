@@ -898,6 +898,73 @@ contract ERC4626MarketYieldStrategyTest is Test {
         strategy.skimSurplus(address(underlyingToken), withdrawer);
     }
 
+    // ---- return value (actual underlying received) ----
+
+    /// @notice skimSurplus returns the actual underlying delivered to the recipient (balance delta)
+    function testSkimSurplusReturnsUnderlyingReceived() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        _authorizeAndDeposit(user2, 3000e18);
+
+        erc4626Vault.simulateYield(800e18);
+
+        uint256 recipientBefore = underlyingToken.balanceOf(withdrawer);
+
+        vm.prank(withdrawer);
+        uint256 returned = strategy.skimSurplus(address(underlyingToken), withdrawer);
+
+        uint256 delta = underlyingToken.balanceOf(withdrawer) - recipientBefore;
+        assertGt(returned, 0, "non-zero surplus should return non-zero");
+        assertEq(returned, delta, "return value == actual underlying delivered to recipient");
+    }
+
+    /// @notice Return value is the ACTUAL post-swap output, which differs from the SurplusSkimmed
+    ///         snapshot sum when the AMM rate is not 1:1. Locks in the documented divergence.
+    function testSkimSurplusReturnsActualSwapOutputNotSnapshot() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        _authorizeAndDeposit(user2, 1000e18);
+
+        erc4626Vault.simulateYield(400e18); // 2000 -> 2400, 400 surplus snapshot
+
+        // Snapshot surplus (vault-asset terms) = what SurplusSkimmed events report
+        uint256 snapSurplus =
+            (strategy.totalBalanceOf(address(underlyingToken), user1)
+                    - strategy.principalOf(address(underlyingToken), user1))
+                + (strategy.totalBalanceOf(address(underlyingToken), user2)
+                    - strategy.principalOf(address(underlyingToken), user2));
+
+        // Sell vault shares at 1.2:1 — recipient receives MORE underlying than the snapshot surplus.
+        ammAdapter.setExchangeRate(address(erc4626Vault), address(underlyingToken), 1.2e18);
+
+        uint256 recipientBefore = underlyingToken.balanceOf(withdrawer);
+
+        vm.prank(withdrawer);
+        uint256 returned = strategy.skimSurplus(address(underlyingToken), withdrawer);
+
+        uint256 delta = underlyingToken.balanceOf(withdrawer) - recipientBefore;
+        assertEq(returned, delta, "return value == actual underlying delivered to recipient");
+        assertGt(returned, snapSurplus, "return reflects post-swap output, not the snapshot surplus sum");
+    }
+
+    /// @notice skimSurplus returns 0 when there is no surplus (no-op path, no swap)
+    function testSkimSurplusReturnsZeroOnNoSurplus() public {
+        _authorizeAndDeposit(user1, 1000e18);
+
+        vm.prank(withdrawer);
+        uint256 returned = strategy.skimSurplus(address(underlyingToken), withdrawer);
+
+        assertEq(returned, 0, "no surplus => returns 0");
+    }
+
+    /// @notice skimSurplus returns 0 when nothing has been deposited (totalDeposited == 0)
+    function testSkimSurplusReturnsZeroWhenNoDeposits() public {
+        erc4626Vault.simulateYield(500e18); // yield but zero principal tracked
+
+        vm.prank(withdrawer);
+        uint256 returned = strategy.skimSurplus(address(underlyingToken), withdrawer);
+
+        assertEq(returned, 0, "no deposits => returns 0");
+    }
+
     // ---- guard / access cases ----
 
     function testSkimSurplusRevertsForNonWithdrawer() public {

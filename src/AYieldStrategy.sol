@@ -309,20 +309,25 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
      *         in a single underlying redeem/swap. Always all-or-nothing (fairness).
      * @param token The token address to skim
      * @param recipient The address that will receive all skimmed proceeds
+     * @return underlyingReceived The actual underlying token amount delivered to `recipient`
+     *         (the real redeem/swap result), so callers can bubble it up without re-deriving it.
+     *         This can differ from the sum of the per-client `surplus` amounts emitted in
+     *         `SurplusSkimmed` events (snapshot surplus, vault-asset terms) due to slippage/rounding.
      * @dev Only authorized withdrawers can call this function. The strategy owns the client set, so
      *      no client list is supplied by the caller — this structurally closes the duplicate-driven
      *      over-skim vector (audit M-01). Snapshot semantics; principal accounting untouched.
-     *      An empty client set is a no-op (no revert) so keepers/schedulers never fail spuriously.
+     *      An empty client set is a no-op (no revert, returns 0) so keepers/schedulers never fail spuriously.
      */
     function skimSurplus(address token, address recipient)
         external
         onlyAuthorizedWithdrawer
         nonReentrant
         whenNotPaused
+        returns (uint256 underlyingReceived)
     {
         require(token != address(0), "AYieldStrategy: token cannot be zero address");
         require(recipient != address(0), "AYieldStrategy: recipient cannot be zero address");
-        _skimSurplus(token, _authorizedClients.values(), recipient);
+        return _skimSurplus(token, _authorizedClients.values(), recipient);
     }
 
     // ============ VIRTUAL FUNCTIONS ============
@@ -349,11 +354,15 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
      * @param clients The client addresses (the strategy's authorized set) whose full available
      *        surplus is skimmed
      * @param recipient The address that will receive all skimmed proceeds
+     * @return underlyingReceived The actual underlying delivered to `recipient` (0 on no-op paths).
      * @dev Abstract: each concrete strategy collapses the client set into a SINGLE redeem/swap.
      *      Snapshots total value once, sums per-client floored shares (protocol-favoring rounding),
      *      leaves principal untouched, and emits one SurplusSkimmed per surplus-bearing client.
      */
-    function _skimSurplus(address token, address[] memory clients, address recipient) internal virtual;
+    function _skimSurplus(address token, address[] memory clients, address recipient)
+        internal
+        virtual
+        returns (uint256 underlyingReceived);
 
     // ============ VIRTUAL FUNCTIONS ============
 

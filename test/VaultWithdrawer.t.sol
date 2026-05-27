@@ -140,8 +140,10 @@ contract VaultWithdrawerTest is Test {
         emit SurplusSkimmed(address(depositToken), client, withdrawer, surplus, recipient);
 
         vm.prank(withdrawer);
-        vault.skimSurplus(address(depositToken), recipient);
+        uint256 returned = vault.skimSurplus(address(depositToken), recipient);
 
+        // Return value == actual underlying delivered to recipient (balance delta)
+        assertEq(returned, depositToken.balanceOf(recipient) - recipientBalanceBefore, "return == underlying delivered");
         // Principal unchanged at 1000e18; full surplus (~100e18) sent to recipient
         assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
         assertApproxEqAbs(

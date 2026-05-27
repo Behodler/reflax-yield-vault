@@ -198,6 +198,17 @@ Projects that reference vault-RM contracts will need to update their imports and
 
 This naming convention eliminates ambiguity and makes the codebase more maintainable for both humans and AI agents.
 
+## `skimSurplus` return value vs. `SurplusSkimmed` events
+
+`skimSurplus(token, recipient)` returns a single `uint256 underlyingReceived`: the **actual underlying token amount delivered to `recipient`**, taken straight from the real redeem/swap result. It exists so downstream consumers (e.g. `stableYieldAccumulator`) can bubble the figure into their own "yield collected" event instead of re-deriving it — saving gas and avoiding a second, drift-prone source of truth.
+
+**Critical for external bookkeeping:** this return value can — and for `ERC4626MarketYieldStrategy` routinely will — differ from the sum of the per-client `surplus` amounts emitted across the `SurplusSkimmed` events of the same call. They measure different things:
+
+- **`SurplusSkimmed.amount` (per client):** the pre-redeem/pre-swap **snapshot surplus**, in vault-asset terms. Use these for per-client attribution.
+- **`skimSurplus` return value:** the **post-redeem / post-swap** underlying actually received, net of AMM price, slippage, and rounding. Treat this as authoritative for "tokens received".
+
+For `ERC4626YieldStrategy` the two are close (they diverge only by ERC4626 redeem rounding). For `ERC4626MarketYieldStrategy` the swap output is governed by the AMM rate, so the gap can be large in either direction. Do **not** assume the events sum to the return value.
+
 ## AMM Route Configuration (AMMRoutes.json)
 
 `AMMRoutes.json` at the project root is a catalog of pre-configured AMM swap routes used by deployment scripts when wiring up concrete `IAMMAdapter` implementations for `ERC4626MarketYieldStrategy` (and future strategies that depend on AMM adapters).

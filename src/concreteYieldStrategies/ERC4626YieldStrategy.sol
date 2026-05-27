@@ -373,10 +373,14 @@ contract ERC4626YieldStrategy is AYieldStrategy {
      *      it fails LOUDLY rather than over-redeeming. The EnumerableSet of clients already
      *      guarantees distinctness, so this require is defense-in-depth.
      */
-    function _skimSurplus(address token, address[] memory clients, address recipient) internal override {
+    function _skimSurplus(address token, address[] memory clients, address recipient)
+        internal
+        override
+        returns (uint256 underlyingReceived)
+    {
         require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
         uint256 td = totalDeposited[token];
-        if (td == 0) return;
+        if (td == 0) return 0;
         uint256 totalValue = vault.convertToAssets(vault.balanceOf(address(this))); // snapshot
         uint256 totalShares;
         for (uint256 i = 0; i < clients.length; i++) {
@@ -390,12 +394,14 @@ contract ERC4626YieldStrategy is AYieldStrategy {
             totalShares += vault.convertToShares(surplus); // per-client floor (protocol-favoring)
             emit SurplusSkimmed(token, client, msg.sender, surplus, recipient);
         }
-        if (totalShares == 0) return;
+        if (totalShares == 0) return 0;
         // Loud aggregate-surplus ceiling (audit M-01): never redeem beyond the protocol's surplus.
         uint256 aggregateSurplus = totalValue > td ? totalValue - td : 0;
         uint256 maxSurplusShares = vault.convertToShares(aggregateSurplus);
         require(totalShares <= maxSurplusShares, "ERC4626YieldStrategy: skim exceeds aggregate surplus");
-        vault.redeem(totalShares, recipient, address(this)); // SINGLE redeem
+        // Return the ACTUAL underlying delivered to `recipient` (real redeem result) so the caller can
+        // bubble it up. May differ from the SurplusSkimmed snapshot sum (rounding/fees) — see CLAUDE.md.
+        underlyingReceived = vault.redeem(totalShares, recipient, address(this)); // SINGLE redeem
         // Principal tracking intentionally untouched (surplus-only).
     }
 }

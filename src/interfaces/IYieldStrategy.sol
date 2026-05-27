@@ -87,10 +87,15 @@ interface IYieldStrategy {
      *         owns the client set, so no client list is supplied by the caller. Principal untouched.
      * @param token The token address to skim
      * @param recipient The address that will receive all skimmed proceeds
+     * @return underlyingReceived The actual underlying token amount delivered to `recipient`
+     *         (the real redeem/swap result). NOTE: this can differ from the sum of the per-client
+     *         `surplus` amounts emitted in `SurplusSkimmed` events — those carry the pre-redeem/
+     *         pre-swap snapshot surplus in vault-asset terms, whereas this value is post-slippage /
+     *         post-rounding underlying. External bookkeeping must not assume the two are equal.
      * @dev Only authorized withdrawers can call this function. Snapshot semantics: every client's
-     *      surplus is read before any redemption. An empty client set is a no-op (no revert).
+     *      surplus is read before any redemption. An empty client set is a no-op (no revert, returns 0).
      */
-    function skimSurplus(address token, address recipient) external;
+    function skimSurplus(address token, address recipient) external returns (uint256 underlyingReceived);
 
     /**
      * @notice The set of clients the strategy will skim (and that may deposit/withdraw)
