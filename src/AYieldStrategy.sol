@@ -31,6 +31,14 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     /// @notice Mapping of addresses authorized to withdraw on behalf of clients
     mapping(address => bool) public authorizedWithdrawers;
 
+    /// @notice Per-client set-aside buffer, in PERCENT (0–100). On skimSurplus, this percentage of the
+    ///         client's own realized surplus is returned to the client instead of going to `recipient`,
+    ///         giving the client a reserve to absorb below-par dips. Defaults to 0 (no set-aside).
+    /// @dev Keyed by `client` only (not `token`) because each concrete strategy serves a single
+    ///      `underlyingToken`. A future multi-token strategy would promote this to
+    ///      mapping(token => mapping(client => uint256)).
+    mapping(address => uint256) public setAsideBufferSize;
+
     /// @notice Withdrawal status enumeration
     enum WithdrawalStatus {
         None, // No withdrawal initiated
@@ -69,6 +77,14 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
      * @param authorized Whether the withdrawer is now authorized (true) or not (false)
      */
     event WithdrawerAuthorizationSet(address indexed withdrawer, bool authorized);
+
+    /**
+     * @notice Emitted when a client's set-aside buffer percentage is updated
+     * @param client The client address whose buffer was changed
+     * @param oldPercent The previous buffer percentage (0–100)
+     * @param newPercent The new buffer percentage (0–100)
+     */
+    event SetAsideBufferSet(address indexed client, uint256 oldPercent, uint256 newPercent);
 
     /**
      * @notice Emitted when an authorized withdrawer skims surplus from a client balance
@@ -214,6 +230,32 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
         authorizedWithdrawers[withdrawer] = _auth;
 
         emit WithdrawerAuthorizationSet(withdrawer, _auth);
+    }
+
+    /**
+     * @notice Set a client's set-aside buffer percentage (0–100).
+     * @param client The client whose buffer percentage is being set
+     * @param bufferPercent The percentage (0–100) of the client's surplus retained by the client on each skim
+     * @dev Owner-gated. Percentage of the client's surplus retained by the client on each skim.
+     *
+     *      AUDITOR NOTE — known, accepted economic quirk (NOT an exploitable vulnerability):
+     *      Because each client's surplus is its principal-weighted share of the strategy's total
+     *      surplus, a client that front-runs a skim with a large fresh deposit increases its share
+     *      of the (fixed) total surplus and therefore the amount set aside to itself — effectively
+     *      redirecting buffer that would otherwise have been attributed to other clients. This is
+     *      acceptable here for two reasons: (1) every client is a protocol-owned contract, so no
+     *      external attacker can profit; the funds merely move between the protocol's own buffers.
+     *      (2) The buffer only makes that client's stakers better-insulated against a below-par dip —
+     *      it never lets stakers withdraw MORE than their staked principal, and principal accounting
+     *      is untouched by skims. The skim caller simply receives correspondingly less, which it
+     *      already tolerates via its slippage floor (e.g. SYA's minRewardTokenSupplied).
+     */
+    function setSetAsideBuffer(address client, uint256 bufferPercent) external override onlyOwner {
+        require(client != address(0), "AYieldStrategy: client cannot be zero address");
+        require(bufferPercent <= 100, "AYieldStrategy: buffer percent exceeds 100");
+        uint256 old = setAsideBufferSize[client];
+        setAsideBufferSize[client] = bufferPercent;
+        emit SetAsideBufferSet(client, old, bufferPercent);
     }
 
     /**

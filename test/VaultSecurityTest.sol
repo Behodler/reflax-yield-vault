@@ -577,4 +577,59 @@ contract VaultSecurityTest is Test {
         emit AYieldStrategy.ClientAuthorizationSet(client2, false);
         vault.setClient(client2, false);
     }
+
+    // ============ setAsideBuffer ACCESS CONTROL / BOUNDS TESTS ============
+
+    /// @notice Default set-aside buffer is 0 for an unconfigured client
+    function testSetAsideBufferDefaultsZero() public view {
+        assertEq(vault.setAsideBufferSize(bondingCurve), 0);
+        assertEq(vault.setAsideBufferSize(user1), 0);
+    }
+
+    /// @notice Only the owner can set a client's buffer; the SetAsideBufferSet event is emitted
+    function testOnlyOwnerCanSetSetAsideBuffer() public {
+        vm.prank(owner);
+        vm.expectEmit(true, false, false, true);
+        emit AYieldStrategy.SetAsideBufferSet(bondingCurve, 0, 35);
+        vault.setSetAsideBuffer(bondingCurve, 35);
+        assertEq(vault.setAsideBufferSize(bondingCurve), 35);
+    }
+
+    /// @notice Non-owners (user, attacker, the client itself) cannot set a buffer
+    function testUnauthorizedSetSetAsideBufferReverts() public {
+        vm.prank(user1);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user1));
+        vault.setSetAsideBuffer(bondingCurve, 10);
+
+        vm.prank(attacker);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, attacker));
+        vault.setSetAsideBuffer(bondingCurve, 10);
+
+        vm.prank(bondingCurve);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, bondingCurve));
+        vault.setSetAsideBuffer(bondingCurve, 10);
+
+        assertEq(vault.setAsideBufferSize(bondingCurve), 0);
+    }
+
+    /// @notice A buffer percent above 100 reverts
+    function testSetSetAsideBufferAbove100Reverts() public {
+        vm.prank(owner);
+        vm.expectRevert("AYieldStrategy: buffer percent exceeds 100");
+        vault.setSetAsideBuffer(bondingCurve, 101);
+    }
+
+    /// @notice The boundary value 100 is accepted
+    function testSetSetAsideBufferExactly100Allowed() public {
+        vm.prank(owner);
+        vault.setSetAsideBuffer(bondingCurve, 100);
+        assertEq(vault.setAsideBufferSize(bondingCurve), 100);
+    }
+
+    /// @notice A zero client address reverts
+    function testSetSetAsideBufferZeroClientReverts() public {
+        vm.prank(owner);
+        vm.expectRevert("AYieldStrategy: client cannot be zero address");
+        vault.setSetAsideBuffer(address(0), 10);
+    }
 }

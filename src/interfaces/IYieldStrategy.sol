@@ -102,4 +102,16 @@ interface IYieldStrategy {
      * @return The list of currently-authorized client addresses
      */
     function getAuthorizedClients() external view returns (address[] memory);
+
+    /**
+     * @notice Set a client's set-aside buffer percentage (0–100). Owner-gated. On skimSurplus this
+     *         percentage of the client's realized surplus is returned to the client (a reserve against
+     *         below-par dips) and the skim's delivered amount / return value is reduced accordingly.
+     */
+    function setSetAsideBuffer(address client, uint256 bufferPercent) external;
+
+    /**
+     * @notice The set-aside buffer percentage (0–100) currently configured for a client.
+     */
+    function setAsideBufferSize(address client) external view returns (uint256);
 }

@@ -423,4 +423,78 @@ contract VaultWithdrawerTest is Test {
         assertFalse(vault.authorizedWithdrawers(withdrawer));
         assertTrue(vault.authorizedWithdrawers(withdrawer2));
     }
+
+    // ============ setAsideBuffer END-TO-END TESTS ============
+
+    event SetAsideBufferSet(address indexed client, uint256 oldPercent, uint256 newPercent);
+
+    /// @notice Owner-only setter; bounds + event coverage
+    function testSetSetAsideBufferAccessAndBounds() public {
+        // owner (this) can set
+        vm.expectEmit(true, false, false, true);
+        emit SetAsideBufferSet(client, 0, 20);
+        vault.setSetAsideBuffer(client, 20);
+        assertEq(vault.setAsideBufferSize(client), 20);
+
+        // non-owner reverts
+        vm.prank(unauthorized);
+        vm.expectRevert();
+        vault.setSetAsideBuffer(client, 50);
+
+        // > 100 reverts
+        vm.expectRevert("AYieldStrategy: buffer percent exceeds 100");
+        vault.setSetAsideBuffer(client, 101);
+
+        // zero client reverts
+        vm.expectRevert("AYieldStrategy: client cannot be zero address");
+        vault.setSetAsideBuffer(address(0), 10);
+    }
+
+    /// @notice End-to-end buffer skim across the authorized set: the return value is reduced by the
+    ///         total set-aside, SurplusSkimmed events still emit per surplus-bearing client.
+    function testSkimSurplusBufferEndToEnd() public {
+        address client2 = address(0x6);
+
+        vault.setWithdrawer(withdrawer, true);
+        vault.setClient(client2, true);
+
+        setupPrincipalAndSurplus(address(depositToken), client, 1000e18, 0);
+        setupPrincipalAndSurplus(address(depositToken), client2, 3000e18, 0);
+        // Single yield event after both deposits so the surplus is proportional
+        erc4626Vault.simulateYield(800e18); // 4000 -> 4800
+
+        // client gets a 50% buffer; client2 stays at 0
+        vault.setSetAsideBuffer(client, 50);
+
+        uint256 surplus1 =
+            vault.totalBalanceOf(address(depositToken), client) - vault.principalOf(address(depositToken), client);
+        uint256 surplus2 =
+            vault.totalBalanceOf(address(depositToken), client2) - vault.principalOf(address(depositToken), client2);
+
+        // Both clients are surplus-bearing => one SurplusSkimmed event each (snapshot surplus)
+        vm.expectEmit(true, true, true, true);
+        emit SurplusSkimmed(address(depositToken), client, withdrawer, surplus1, recipient);
+        vm.expectEmit(true, true, true, true);
+        emit SurplusSkimmed(address(depositToken), client2, withdrawer, surplus2, recipient);
+
+        uint256 clientBefore = depositToken.balanceOf(client);
+        uint256 recipientBefore = depositToken.balanceOf(recipient);
+
+        vm.prank(withdrawer);
+        uint256 returned = vault.skimSurplus(address(depositToken), recipient);
+
+        uint256 clientGot = depositToken.balanceOf(client) - clientBefore;
+        uint256 recipientGot = depositToken.balanceOf(recipient) - recipientBefore;
+
+        // client got ~50% of its surplus back as a set-aside buffer
+        assertApproxEqAbs(clientGot, surplus1 / 2, 5, "client set-aside ~ 50% of its surplus");
+        assertGt(clientGot, 0);
+        // return value == what recipient actually received, and is reduced by the set-aside
+        assertEq(returned, recipientGot, "return == recipient delivered");
+        assertApproxEqAbs(recipientGot, surplus1 / 2 + surplus2, 6, "recipient = remainder of client + all of client2");
+
+        // Principal accounting untouched by the skim
+        assertEq(vault.principalOf(address(depositToken), client), 1000e18);
+        assertEq(vault.principalOf(address(depositToken), client2), 3000e18);
+    }
 }

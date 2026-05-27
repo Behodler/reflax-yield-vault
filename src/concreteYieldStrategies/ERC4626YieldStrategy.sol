@@ -382,26 +382,99 @@ contract ERC4626YieldStrategy is AYieldStrategy {
         uint256 td = totalDeposited[token];
         if (td == 0) return 0;
         uint256 totalValue = vault.convertToAssets(vault.balanceOf(address(this))); // snapshot
-        uint256 totalShares;
-        for (uint256 i = 0; i < clients.length; i++) {
-            address client = clients[i];
-            require(client != address(0), "ERC4626YieldStrategy: client cannot be zero address");
-            uint256 principal = clientBalances[token][client];
-            if (principal == 0) continue;
-            uint256 total = (totalValue * principal) / td; // == totalBalanceOf(client)
-            uint256 surplus = total > principal ? total - principal : 0;
-            if (surplus == 0) continue;
-            totalShares += vault.convertToShares(surplus); // per-client floor (protocol-favoring)
-            emit SurplusSkimmed(token, client, msg.sender, surplus, recipient);
-        }
+        uint256[] memory bufferShares = new uint256[](clients.length);
+        (uint256 totalShares, uint256 totalBufferShares) =
+            _accrueSurplusShares(token, clients, recipient, totalValue, bufferShares);
         if (totalShares == 0) return 0;
         // Loud aggregate-surplus ceiling (audit M-01): never redeem beyond the protocol's surplus.
         uint256 aggregateSurplus = totalValue > td ? totalValue - td : 0;
-        uint256 maxSurplusShares = vault.convertToShares(aggregateSurplus);
-        require(totalShares <= maxSurplusShares, "ERC4626YieldStrategy: skim exceeds aggregate surplus");
-        // Return the ACTUAL underlying delivered to `recipient` (real redeem result) so the caller can
-        // bubble it up. May differ from the SurplusSkimmed snapshot sum (rounding/fees) — see CLAUDE.md.
-        underlyingReceived = vault.redeem(totalShares, recipient, address(this)); // SINGLE redeem
-        // Principal tracking intentionally untouched (surplus-only).
+        require(
+            totalShares <= vault.convertToShares(aggregateSurplus),
+            "ERC4626YieldStrategy: skim exceeds aggregate surplus"
+        );
+
+        // FAST PATH — no buffers configured (the default): behave exactly as before, a single redeem
+        // straight to `recipient`. Return the ACTUAL underlying delivered (real redeem result) so the
+        // caller can bubble it up. May differ from the SurplusSkimmed snapshot sum (rounding/fees) —
+        // see CLAUDE.md.
+        if (totalBufferShares == 0) {
+            underlyingReceived = vault.redeem(totalShares, recipient, address(this)); // SINGLE redeem
+            return underlyingReceived;
+        }
+
+        // BUFFERED PATH — redeem to self, then split the actual proceeds: each client gets its
+        // proportional share of the set-aside, the remainder goes to `recipient`. Principal untouched.
+        underlyingReceived = vault.redeem(totalShares, address(this), address(this)); // SINGLE redeem
+        return _distributeBuffer(clients, bufferShares, underlyingReceived, totalShares, recipient);
+    }
+
+    /**
+     * @notice Snapshot-loop helper: sum per-client FLOORED surplus shares and per-client buffer shares,
+     *         emitting one SurplusSkimmed per surplus-bearing client.
+     * @param token The underlying token
+     * @param clients The client set
+     * @param recipient The skim recipient (for the event)
+     * @param totalValue The snapshot total vault value
+     * @param bufferShares Out-param array (parallel to clients) populated with per-client buffer shares
+     * @return totalShares Aggregate FLOORED surplus shares across all clients
+     * @return totalBufferShares Aggregate buffer shares across all clients
+     * @dev Factored out to keep `_skimSurplus` within the EVM stack-depth limit.
+     */
+    function _accrueSurplusShares(
+        address token,
+        address[] memory clients,
+        address recipient,
+        uint256 totalValue,
+        uint256[] memory bufferShares
+    ) private returns (uint256 totalShares, uint256 totalBufferShares) {
+        uint256 td = totalDeposited[token];
+        for (uint256 i = 0; i < clients.length; i++) {
+            address client = clients[i];
+            require(client != address(0), "ERC4626YieldStrategy: client cannot be zero address");
+            uint256 surplus;
+            {
+                uint256 principal = clientBalances[token][client];
+                if (principal == 0) continue;
+                uint256 total = (totalValue * principal) / td; // == totalBalanceOf(client)
+                if (total <= principal) continue;
+                surplus = total - principal;
+            }
+            emit SurplusSkimmed(token, client, msg.sender, surplus, recipient);
+            uint256 shares = vault.convertToShares(surplus); // per-client floor (protocol-favoring)
+            totalShares += shares;
+            shares = shares * setAsideBufferSize[client] / 100; // reuse slot: now buffer shares (0–100)
+            bufferShares[i] = shares;
+            totalBufferShares += shares;
+        }
+    }
+
+    /**
+     * @notice Distribute actual redeem proceeds: set-aside buffers to clients, remainder to recipient.
+     * @param clients The client set (parallel to bufferShares)
+     * @param bufferShares Per-client buffer shares (indexed by loop position)
+     * @param underlyingReceived The actual underlying received from the single redeem
+     * @param totalShares The aggregate shares redeemed
+     * @param recipient The address that receives the remainder
+     * @return toRecipient The amount delivered to `recipient` (reduced by total set-aside)
+     * @dev Factored out to keep the caller within the EVM stack-depth limit.
+     */
+    function _distributeBuffer(
+        address[] memory clients,
+        uint256[] memory bufferShares,
+        uint256 underlyingReceived,
+        uint256 totalShares,
+        address recipient
+    ) private returns (uint256 toRecipient) {
+        uint256 totalSetAside;
+        for (uint256 i = 0; i < clients.length; i++) {
+            if (bufferShares[i] == 0) continue;
+            uint256 buf = underlyingReceived * bufferShares[i] / totalShares; // actual-tokens, proportional
+            if (buf == 0) continue;
+            totalSetAside += buf;
+            underlyingToken.safeTransfer(clients[i], buf); // set aside back to the client
+        }
+        toRecipient = underlyingReceived - totalSetAside; // dust (rounding) favors recipient
+        if (toRecipient > 0) underlyingToken.safeTransfer(recipient, toRecipient);
+        return toRecipient; // RETURN VALUE REDUCED by totalSetAside
     }
 }

@@ -419,31 +419,104 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         uint256 td = totalDeposited[token];
         if (td == 0) return 0;
         uint256 totalValue = vault.convertToAssets(vault.balanceOf(address(this))); // snapshot
-        uint256 totalShares;
-        for (uint256 i = 0; i < clients.length; i++) {
-            address client = clients[i];
-            require(client != address(0), "ERC4626MarketYieldStrategy: client cannot be zero address");
-            uint256 principal = clientBalances[token][client];
-            if (principal == 0) continue;
-            uint256 total = (totalValue * principal) / td; // == totalBalanceOf(client)
-            uint256 surplus = total > principal ? total - principal : 0;
-            if (surplus == 0) continue;
-            totalShares += vault.convertToShares(surplus); // per-client floor (protocol-favoring)
-            emit SurplusSkimmed(token, client, msg.sender, surplus, recipient);
-        }
+        uint256[] memory bufferShares = new uint256[](clients.length);
+        (uint256 totalShares, uint256 totalBufferShares) =
+            _accrueSurplusShares(token, clients, recipient, totalValue, bufferShares);
         if (totalShares == 0) return 0;
         // Loud aggregate-surplus ceiling (audit M-01): never sell beyond the protocol's surplus.
         uint256 aggregateSurplus = totalValue > td ? totalValue - td : 0;
-        uint256 maxSurplusShares = vault.convertToShares(aggregateSurplus);
-        require(totalShares <= maxSurplusShares, "ERC4626MarketYieldStrategy: skim exceeds aggregate surplus");
+        require(
+            totalShares <= vault.convertToShares(aggregateSurplus),
+            "ERC4626MarketYieldStrategy: skim exceeds aggregate surplus"
+        );
+        // minOut is computed on the full `totalShares`: the whole surplus is sold in ONE swap; only the
+        // distribution of the proceeds changes when buffers are set, so slippage behavior is unchanged.
         uint256 idealUnderlying = vault.convertToAssets(totalShares);
         uint256 minOut = idealUnderlying * (MAX_BPS - slippageToleranceBps) / MAX_BPS;
         IERC20(address(vault)).safeIncreaseAllowance(address(ammAdapter), totalShares);
-        // Return the ACTUAL underlying delivered to `recipient` (real post-swap output) so the caller can
-        // bubble it up. This is net of AMM price/slippage and so will generally differ from the
-        // SurplusSkimmed snapshot sum (vault-asset terms) — see CLAUDE.md.
-        underlyingReceived = ammAdapter.swap(address(vault), address(underlyingToken), totalShares, minOut); // SINGLE swap
-        underlyingToken.safeTransfer(recipient, underlyingReceived);
-        // Principal tracking intentionally untouched (surplus-only).
+        // SINGLE swap — output lands in address(this). Return value is the ACTUAL underlying received,
+        // net of AMM price/slippage, and so will generally differ from the SurplusSkimmed snapshot sum
+        // (vault-asset terms) — see CLAUDE.md.
+        underlyingReceived = ammAdapter.swap(address(vault), address(underlyingToken), totalShares, minOut);
+
+        // FAST PATH — no buffers configured (the default): forward the whole swap output to `recipient`.
+        if (totalBufferShares == 0) {
+            underlyingToken.safeTransfer(recipient, underlyingReceived);
+            return underlyingReceived;
+        }
+
+        // BUFFERED PATH — split the actual proceeds: each client gets its proportional share of the
+        // set-aside, the remainder goes to `recipient`. Principal tracking intentionally untouched.
+        return _distributeBuffer(clients, bufferShares, underlyingReceived, totalShares, recipient);
+    }
+
+    /**
+     * @notice Snapshot-loop helper: sum per-client FLOORED surplus shares and per-client buffer shares,
+     *         emitting one SurplusSkimmed per surplus-bearing client.
+     * @param token The underlying token
+     * @param clients The client set
+     * @param recipient The skim recipient (for the event)
+     * @param totalValue The snapshot total vault value
+     * @param bufferShares Out-param array (parallel to clients) populated with per-client buffer shares
+     * @return totalShares Aggregate FLOORED surplus shares across all clients
+     * @return totalBufferShares Aggregate buffer shares across all clients
+     * @dev Factored out to keep `_skimSurplus` within the EVM stack-depth limit.
+     */
+    function _accrueSurplusShares(
+        address token,
+        address[] memory clients,
+        address recipient,
+        uint256 totalValue,
+        uint256[] memory bufferShares
+    ) private returns (uint256 totalShares, uint256 totalBufferShares) {
+        uint256 td = totalDeposited[token];
+        for (uint256 i = 0; i < clients.length; i++) {
+            address client = clients[i];
+            require(client != address(0), "ERC4626MarketYieldStrategy: client cannot be zero address");
+            uint256 surplus;
+            {
+                uint256 principal = clientBalances[token][client];
+                if (principal == 0) continue;
+                uint256 total = (totalValue * principal) / td; // == totalBalanceOf(client)
+                if (total <= principal) continue;
+                surplus = total - principal;
+            }
+            emit SurplusSkimmed(token, client, msg.sender, surplus, recipient);
+            uint256 shares = vault.convertToShares(surplus); // per-client floor (protocol-favoring)
+            totalShares += shares;
+            shares = shares * setAsideBufferSize[client] / 100; // reuse slot: now buffer shares (0–100)
+            bufferShares[i] = shares;
+            totalBufferShares += shares;
+        }
+    }
+
+    /**
+     * @notice Distribute actual swap proceeds: set-aside buffers to clients, remainder to recipient.
+     * @param clients The client set (parallel to bufferShares)
+     * @param bufferShares Per-client buffer shares (indexed by loop position)
+     * @param underlyingReceived The actual underlying received from the single swap
+     * @param totalShares The aggregate shares sold in the swap
+     * @param recipient The address that receives the remainder
+     * @return toRecipient The amount delivered to `recipient` (reduced by total set-aside)
+     * @dev Factored out to keep the caller within the EVM stack-depth limit.
+     */
+    function _distributeBuffer(
+        address[] memory clients,
+        uint256[] memory bufferShares,
+        uint256 underlyingReceived,
+        uint256 totalShares,
+        address recipient
+    ) private returns (uint256 toRecipient) {
+        uint256 totalSetAside;
+        for (uint256 i = 0; i < clients.length; i++) {
+            if (bufferShares[i] == 0) continue;
+            uint256 buf = underlyingReceived * bufferShares[i] / totalShares; // actual-tokens, proportional
+            if (buf == 0) continue;
+            totalSetAside += buf;
+            underlyingToken.safeTransfer(clients[i], buf); // set aside back to the client
+        }
+        toRecipient = underlyingReceived - totalSetAside; // dust (rounding) favors recipient
+        if (toRecipient > 0) underlyingToken.safeTransfer(recipient, toRecipient);
+        return toRecipient; // RETURN VALUE REDUCED by totalSetAside
     }
 }
