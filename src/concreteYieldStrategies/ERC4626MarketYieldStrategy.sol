@@ -13,14 +13,22 @@ import "@openzeppelin/contracts/interfaces/IERC4626.sol";
  * @dev Addresses ERC4626 vaults with restrictions (e.g., sUSDe's 7-day cooldown on withdrawals)
  *      by purchasing vault tokens on the open market during deposit and selling them during withdrawal.
  *
- *      This strategy uses the same principal tracking and proportional yield distribution as
- *      ERC4626YieldStrategy, but replaces vault.deposit()/vault.redeem() with AMM swaps.
+ *      This strategy uses the same proportional yield distribution as ERC4626YieldStrategy, but
+ *      replaces vault.deposit()/vault.redeem() with AMM swaps.
  *
  *      WARNING: Rebasing vaults are NOT supported. This strategy assumes vault share prices
  *      only increase (or stay flat) over time.
  *
  *      Rounding rules: All rounding favors the protocol. Principal is decremented by requested
- *      amount, not received amount, so any shortfall accumulates as protocol-owned yield.
+ *      amount on withdrawal, not received amount, so any shortfall accumulates as protocol-owned
+ *      yield.
+ *
+ *      Deposit principal crediting: because deposits acquire vault shares via an AMM (whose price
+ *      can deviate from the vault NAV), principal is credited with the REALIZED NAV value of the
+ *      shares received (convertToAssets(sharesReceived)), NOT the face amount of underlying paid
+ *      in. This differs from ERC4626YieldStrategy (where vault.deposit makes the two equal up to
+ *      dust). It internalizes deposit-side slippage to the depositor and keeps aggregate pending
+ *      surplus invariant across deposits, so a deposit cannot dilute other clients' pending yield.
  */
 contract ERC4626MarketYieldStrategy is AYieldStrategy {
     using SafeERC20 for IERC20;
@@ -55,7 +63,9 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
      * @param token The underlying token address
      * @param depositor The address that initiated the deposit (client or owner)
      * @param recipient The recipient of the deposited tokens (for accounting)
-     * @param amount The amount of underlying token deposited
+     * @param amount The principal credited to the recipient: the realized NAV value of the shares
+     *        received (convertToAssets(sharesReceived)), which may differ from the face amount
+     *        of underlying transferred in when the AMM price deviates from the vault NAV
      * @param sharesReceived The amount of vault shares received from AMM swap
      */
     event Deposited(
@@ -283,11 +293,22 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         uint256 sharesReceived = ammAdapter.swap(address(underlyingToken), address(vault), amount, minOut);
         require(sharesReceived > 0, "ERC4626MarketYieldStrategy: no shares received");
 
-        // Update principal tracking
-        clientBalances[token][recipient] += amount;
-        totalDeposited[token] += amount;
+        // Credit principal with the REALIZED NAV value of the shares actually received, not the
+        // face `amount`. The deposit swaps through an AMM, so `sharesReceived` is governed by the
+        // AMM price and can be worth more or less than `amount`. Crediting `convertToAssets`
+        // (a) values principal on the SAME basis as totalBalanceOf (vault NAV), keeping
+        //     surplus = balance - principal coherent, and
+        // (b) internalizes the depositor's own swap slippage to their principal instead of
+        //     socializing it across other clients' pending yield (aggregate surplus is preserved).
+        // convertToAssets floors, so rounding favors the protocol.
+        uint256 valueAdded = vault.convertToAssets(sharesReceived);
+        require(valueAdded > 0, "ERC4626MarketYieldStrategy: zero value added");
 
-        emit Deposited(token, depositor, recipient, amount, sharesReceived);
+        // Update principal tracking
+        clientBalances[token][recipient] += valueAdded;
+        totalDeposited[token] += valueAdded;
+
+        emit Deposited(token, depositor, recipient, valueAdded, sharesReceived);
     }
 
     /**

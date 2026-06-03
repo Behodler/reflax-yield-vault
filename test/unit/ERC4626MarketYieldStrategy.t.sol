@@ -234,7 +234,11 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(client);
         strategy.deposit(address(underlyingToken), 1000e18, user1);
 
-        assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+        // Principal is credited with the REALIZED NAV value of the shares received (0.5% less),
+        // not the face amount: the depositor internalizes their own slippage rather than
+        // socializing it across other clients' pending yield. Vault share price is 1:1 here,
+        // so NAV value == shares received == 995e18.
+        assertEq(strategy.principalOf(address(underlyingToken), user1), 995e18);
     }
 
     // ============ PRINCIPAL TRACKING CONSISTENCY TESTS ============
@@ -729,8 +733,10 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(client);
         strategy.deposit(address(underlyingToken), 1000e18, user1);
 
-        // Principal tracks input amount, not received shares
-        assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+        // Principal is credited with the REALIZED NAV value of the shares received. A favorable
+        // AMM rate buys more shares, so the depositor is credited the extra value (1020e18) —
+        // symmetric with the unfavorable-slippage case. Vault share price is 1:1 here.
+        assertEq(strategy.principalOf(address(underlyingToken), user1), 1020e18);
 
         // Should have more shares than a 1:1 deposit
         assertGt(strategy.getTotalShares(), 1000e18);
@@ -755,6 +761,72 @@ contract ERC4626MarketYieldStrategyTest is Test {
         assertEq(strategy.principalOf(address(underlyingToken), client), 500e18);
         // Received should be slightly less than requested
         assertLt(received, 500e18);
+    }
+
+    // ============ REALIZED-VALUE PRINCIPAL CREDITING TESTS ============
+    // Deposits credit principal with convertToAssets(sharesReceived) — the realized NAV value
+    // added to the pool — instead of the face `amount`. This internalizes deposit-side AMM
+    // slippage to the depositor and keeps aggregate pending surplus invariant across deposits.
+
+    /// @notice Unfavorable AMM rate: principal credited with realized value (< face amount).
+    function testDepositCreditsRealizedValueUnderSlippage() public {
+        // AMM returns 2% fewer shares than face. Vault share price is 1:1, so NAV value == shares.
+        ammAdapter.setExchangeRate(address(underlyingToken), address(erc4626Vault), 0.98e18);
+        vm.prank(owner);
+        strategy.setSlippageTolerance(300); // 3% tolerance so the 2% slippage clears minOut
+
+        uint256 expectedValue = erc4626Vault.convertToAssets(980e18); // realized NAV value
+
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, user1);
+
+        assertEq(strategy.principalOf(address(underlyingToken), user1), expectedValue);
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), expectedValue);
+        assertLt(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+    }
+
+    /// @notice Favorable AMM rate: the extra realized value accrues to the depositor's principal.
+    function testDepositCreditsRealizedValueWhenFavorable() public {
+        ammAdapter.setExchangeRate(address(underlyingToken), address(erc4626Vault), 1.02e18);
+
+        uint256 expectedValue = erc4626Vault.convertToAssets(1020e18);
+
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, user1);
+
+        assertEq(strategy.principalOf(address(underlyingToken), user1), expectedValue);
+        assertGt(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+    }
+
+    /// @notice Core invariant: a large, slippery deposit must NOT shrink the pool's aggregate
+    ///         pending surplus (totalValueHeld - totalDeposited). Under the old face-value
+    ///         crediting the deposit's slippage was socialized as a reduction in every client's
+    ///         pending yield; crediting realized NAV value keeps aggregate surplus invariant.
+    function testSlipperyDepositConservesAggregateSurplus() public {
+        // Pre-existing client with pending yield.
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, user1);
+        erc4626Vault.simulateYield(100e18);
+
+        uint256 surplusBefore = erc4626Vault.convertToAssets(strategy.getTotalShares())
+            - strategy.getTotalDeposited(address(underlyingToken));
+        assertGt(surplusBefore, 0, "precondition: pending surplus must exist");
+
+        // A large deposit at a 2% unfavorable AMM rate, within tolerance.
+        ammAdapter.setExchangeRate(address(underlyingToken), address(erc4626Vault), 0.98e18);
+        vm.prank(owner);
+        strategy.setSlippageTolerance(300);
+
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 50_000e18, user2);
+
+        uint256 surplusAfter = erc4626Vault.convertToAssets(strategy.getTotalShares())
+            - strategy.getTotalDeposited(address(underlyingToken));
+
+        // Aggregate surplus preserved (tiny tolerance for integer rounding). Under face-value
+        // crediting totalDeposited would have grown by the full 50,000e18, driving surplus
+        // negative (the subtraction would underflow), so this asserts the fix directly.
+        assertApproxEqAbs(surplusAfter, surplusBefore, 1e6, "slippery deposit must not eat pending yield");
     }
 
     // ============ skimSurplus (all-clients, single-swap) TESTS ============
