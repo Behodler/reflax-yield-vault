@@ -131,7 +131,12 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
         vm.prank(client);
         strategy.deposit(address(usde), depositAmount, client);
 
-        assertEq(strategy.principalOf(address(usde), client), depositAmount, "principal should equal deposit");
+        // Principal is credited conservatively as the slippage haircut, not the nominal amount (story 043).
+        uint256 expectedPrincipal =
+            depositAmount * (strategy.MAX_BPS() - strategy.slippageToleranceBps()) / strategy.MAX_BPS();
+        assertEq(
+            strategy.principalOf(address(usde), client), expectedPrincipal, "principal should equal haircut credit"
+        );
         assertGt(sUSDe.balanceOf(address(strategy)), 0, "strategy should hold sUSDe shares");
 
         uint256 totalBal = strategy.totalBalanceOf(address(usde), client);
@@ -144,6 +149,12 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
 
     function testRoundTripWithdraw() public {
         uint256 depositAmount = 1000e18;
+
+        // Zero tolerance => no haircut buffer => full deposit is credited and the round trip drains to
+        // dust. With a non-zero tolerance the buffer would (correctly) remain as protocol surplus,
+        // which is exercised elsewhere; here we isolate the full-credit round-trip invariant (story 043).
+        vm.prank(owner);
+        strategy.setSlippageTolerance(0);
 
         vm.prank(client);
         strategy.deposit(address(usde), depositAmount, client);
@@ -177,7 +188,10 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
 
         uint256 totalBal = strategy.totalBalanceOf(address(usde), client);
         assertApproxEqAbs(totalBal, 1050e18, 1050e18 * 100 / 10000, "totalBalance should reflect +5% yield");
-        assertEq(strategy.principalOf(address(usde), client), depositAmount, "principal unchanged by yield");
+        // Principal is the haircut credit and is unchanged by vault yield (story 043).
+        uint256 expectedPrincipal =
+            depositAmount * (strategy.MAX_BPS() - strategy.slippageToleranceBps()) / strategy.MAX_BPS();
+        assertEq(strategy.principalOf(address(usde), client), expectedPrincipal, "principal unchanged by yield");
     }
 
     // ============ Scenario 4: Multi-user proportional yield ============
@@ -297,10 +311,12 @@ contract ERC4626MarketYieldStrategy_CurveUSDe is Test {
         vm.prank(owner);
         freshAdapter.setRoute(address(sUSDe), address(usde), revPath, revParams, emptyPools);
 
-        // Deposit should now succeed
+        // Deposit should now succeed; principal is the haircut credit (story 043).
         vm.prank(client);
         freshStrategy.deposit(address(usde), 1000e18, client);
-        assertEq(freshStrategy.principalOf(address(usde), client), 1000e18);
+        uint256 expectedPrincipal = uint256(1000e18) * (freshStrategy.MAX_BPS() - freshStrategy.slippageToleranceBps())
+            / freshStrategy.MAX_BPS();
+        assertEq(freshStrategy.principalOf(address(usde), client), expectedPrincipal);
     }
 
     // ============ Scenario 9: Coin index sanity check ============

@@ -30,6 +30,12 @@ contract ERC4626MarketYieldStrategyTest is Test {
 
     uint256 constant INITIAL_TOKEN_SUPPLY = 10_000_000e18;
 
+    /// @dev Conservative principal the strategy credits for a nominal `amount` at the live tolerance.
+    ///      Mirrors ERC4626MarketYieldStrategy._creditedPrincipal (story 043 haircut).
+    function _haircut(uint256 amount) internal view returns (uint256) {
+        return amount * (strategy.MAX_BPS() - strategy.slippageToleranceBps()) / strategy.MAX_BPS();
+    }
+
     function setUp() public {
         // Deploy mock tokens
         underlyingToken = new MockERC20("Underlying", "UNDERLYING", 18);
@@ -91,8 +97,9 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(client);
         strategy.deposit(address(underlyingToken), depositAmount, user1);
 
-        assertEq(strategy.principalOf(address(underlyingToken), user1), depositAmount);
-        assertEq(strategy.getTotalDeposited(address(underlyingToken)), depositAmount);
+        // Principal is credited conservatively (haircut), not the full nominal amount (story 043).
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(depositAmount));
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), _haircut(depositAmount));
         assertGt(strategy.getTotalShares(), 0);
     }
 
@@ -108,10 +115,14 @@ contract ERC4626MarketYieldStrategyTest is Test {
         strategy.deposit(address(underlyingToken), deposit3, user3);
         vm.stopPrank();
 
-        assertEq(strategy.principalOf(address(underlyingToken), user1), deposit1);
-        assertEq(strategy.principalOf(address(underlyingToken), user2), deposit2);
-        assertEq(strategy.principalOf(address(underlyingToken), user3), deposit3);
-        assertEq(strategy.getTotalDeposited(address(underlyingToken)), deposit1 + deposit2 + deposit3);
+        // Each principal is the haircut of its nominal deposit (story 043).
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(deposit1));
+        assertEq(strategy.principalOf(address(underlyingToken), user2), _haircut(deposit2));
+        assertEq(strategy.principalOf(address(underlyingToken), user3), _haircut(deposit3));
+        assertEq(
+            strategy.getTotalDeposited(address(underlyingToken)),
+            _haircut(deposit1) + _haircut(deposit2) + _haircut(deposit3)
+        );
     }
 
     /// @notice Test deposit transfers underlying tokens from depositor and receives vault shares
@@ -127,6 +138,122 @@ contract ERC4626MarketYieldStrategyTest is Test {
 
         // Strategy should hold vault shares
         assertGt(strategy.getTotalShares(), 0);
+    }
+
+    // ============ CONSERVATIVE PRINCIPAL CREDITING (STORY 043) ============
+    // Principal is credited as the slippage-haircut value
+    // amount * (MAX_BPS - slippageToleranceBps) / MAX_BPS, NOT the full nominal amount.
+
+    /// @notice Solvency invariant: even at worst-case execution (rate == minOut), the fair
+    ///         value of shares held is >= recorded total principal.
+    function testDepositSolvencyInvariantAtWorstCaseExecution() public {
+        uint256 amount = 1000e18;
+        uint256 bps = strategy.slippageToleranceBps(); // 100 (1%) from setUp
+
+        // Worst-case execution: AMM delivers exactly the slippage-adjusted minimum.
+        uint256 worstRate = (strategy.MAX_BPS() - bps) * 1e18 / strategy.MAX_BPS(); // 0.99e18
+        ammAdapter.setExchangeRate(address(underlyingToken), address(erc4626Vault), worstRate);
+
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), amount, user1);
+
+        uint256 fairValue = erc4626Vault.convertToAssets(erc4626Vault.balanceOf(address(strategy)));
+        uint256 recordedDeposited = strategy.getTotalDeposited(address(underlyingToken));
+
+        // Fair value of shares actually held must never be less than recorded obligation.
+        assertGe(fairValue, recordedDeposited, "fair share value must cover recorded principal");
+    }
+
+    /// @notice Good execution surfaces as protocol yield: with ideal (1:1) execution but a non-zero
+    ///         tolerance, totalBalanceOf exceeds principal by approximately amount * bps.
+    function testDepositGoodExecutionBecomesYield() public {
+        uint256 amount = 1000e18;
+        uint256 bps = strategy.slippageToleranceBps(); // 100
+
+        // Ideal execution: AMM delivers full 1:1 (rate already 1e18 in setUp).
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), amount, user1);
+
+        uint256 principal = strategy.principalOf(address(underlyingToken), user1);
+        uint256 total = strategy.totalBalanceOf(address(underlyingToken), user1);
+
+        // Buffer surfaces as surplus.
+        assertGt(total, principal, "good execution should produce surplus");
+        uint256 expectedBuffer = amount * bps / strategy.MAX_BPS(); // ~10e18 at 1%
+        assertApproxEqAbs(total - principal, expectedBuffer, 2, "surplus ~= amount * bps");
+    }
+
+    /// @notice A fresh slippage-incurring deposit by client B must not push existing client A
+    ///         underwater (totalBalanceOf below principal), and — when B enters at the same
+    ///         worst-case execution the pool is already valued at — must not dilute A at all.
+    /// @dev Under the OLD full-amount credit, B's nominal principal exceeded the value B actually
+    ///      brought, dragging the proportional pool down and diluting A. Under the haircut, B's
+    ///      credited principal matches B's worst-case fair value, so the pool stays whole.
+    function testDepositDoesNotDiluteExistingClient() public {
+        uint256 amount = 1000e18;
+        uint256 bps = strategy.slippageToleranceBps();
+        uint256 worstRate = (strategy.MAX_BPS() - bps) * 1e18 / strategy.MAX_BPS();
+
+        // Both clients enter through a slippage-incurring swap (worst-case execution).
+        ammAdapter.setExchangeRate(address(underlyingToken), address(erc4626Vault), worstRate);
+
+        // Client A deposits first.
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), amount, user1);
+
+        uint256 aBalanceBefore = strategy.totalBalanceOf(address(underlyingToken), user1);
+        uint256 aPrincipal = strategy.principalOf(address(underlyingToken), user1);
+
+        // Client B deposits through the same worst-case swap.
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), amount, user2);
+
+        uint256 aBalanceAfter = strategy.totalBalanceOf(address(underlyingToken), user1);
+
+        // A must never be pushed underwater relative to its own principal...
+        assertGe(aBalanceAfter, aPrincipal, "existing client must stay solvent vs principal");
+        // ...and with matched execution quality, A is not diluted at all.
+        assertGe(aBalanceAfter, aBalanceBefore, "existing client must not be diluted");
+    }
+
+    /// @notice Principal credited equals the haircut amount * (MAX_BPS - bps) / MAX_BPS.
+    function testDepositPrincipalEqualsHaircut() public {
+        uint256 amount = 1000e18;
+
+        vm.prank(owner);
+        strategy.setSlippageTolerance(250); // 2.5%
+        uint256 bps = 250;
+
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), amount, user1);
+
+        uint256 expected = amount * (strategy.MAX_BPS() - bps) / strategy.MAX_BPS();
+        assertEq(strategy.principalOf(address(underlyingToken), user1), expected, "principal == haircut");
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), expected, "total == haircut");
+    }
+
+    /// @notice Changing tolerance after a deposit does NOT retroactively alter the earlier principal.
+    function testDepositToleranceChangeNotRetroactive() public {
+        uint256 amount = 1000e18;
+
+        // Deposit at bps1 = 100 (setUp default).
+        uint256 bps1 = strategy.slippageToleranceBps();
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), amount, user1);
+
+        uint256 expectedAtBps1 = amount * (strategy.MAX_BPS() - bps1) / strategy.MAX_BPS();
+        assertEq(strategy.principalOf(address(underlyingToken), user1), expectedAtBps1);
+
+        // Change tolerance to bps2 = 500.
+        vm.prank(owner);
+        strategy.setSlippageTolerance(500);
+
+        // Earlier client's principal is unchanged.
+        assertEq(
+            strategy.principalOf(address(underlyingToken), user1),
+            expectedAtBps1,
+            "tolerance change must not be retroactive"
+        );
     }
 
     // ============ WITHDRAW VIA AMM TESTS ============
@@ -146,8 +273,8 @@ contract ERC4626MarketYieldStrategyTest is Test {
 
         uint256 balanceAfter = underlyingToken.balanceOf(client);
 
-        // Principal should decrease by requested amount
-        assertEq(strategy.principalOf(address(underlyingToken), client), depositAmount - withdrawAmount);
+        // Principal should decrease by requested amount, from the haircut credit (story 043).
+        assertEq(strategy.principalOf(address(underlyingToken), client), _haircut(depositAmount) - withdrawAmount);
         // Client should have received tokens
         assertApproxEqAbs(balanceAfter - balanceBefore, withdrawAmount, 1);
     }
@@ -234,7 +361,8 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(client);
         strategy.deposit(address(underlyingToken), 1000e18, user1);
 
-        assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+        // Principal credited is the haircut, not the nominal amount (story 043).
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(1000e18));
     }
 
     // ============ PRINCIPAL TRACKING CONSISTENCY TESTS ============
@@ -246,14 +374,15 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(client);
         strategy.deposit(address(underlyingToken), depositAmount, user1);
 
-        assertEq(strategy.principalOf(address(underlyingToken), user1), depositAmount);
+        // Credited principal is the haircut (story 043).
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(depositAmount));
 
-        // Withdraw half
+        // Withdraw 500 of the credited principal
         vm.prank(client);
         strategy.withdraw(address(underlyingToken), 500e18, user1);
 
-        assertEq(strategy.principalOf(address(underlyingToken), user1), 500e18);
-        assertEq(strategy.getTotalDeposited(address(underlyingToken)), 500e18);
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(depositAmount) - 500e18);
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), _haircut(depositAmount) - 500e18);
     }
 
     /// @notice Test principal tracking consistency (multi-user)
@@ -263,15 +392,16 @@ contract ERC4626MarketYieldStrategyTest is Test {
         strategy.deposit(address(underlyingToken), 2000e18, user2);
         vm.stopPrank();
 
-        assertEq(strategy.getTotalDeposited(address(underlyingToken)), 3000e18);
+        // Totals reflect the haircut credit (story 043).
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), _haircut(1000e18) + _haircut(2000e18));
 
-        // user1 withdraws entirely
+        // user1 withdraws entirely (request capped to its credited principal)
         vm.prank(client);
         strategy.withdraw(address(underlyingToken), 1000e18, user1);
 
         assertEq(strategy.principalOf(address(underlyingToken), user1), 0);
-        assertEq(strategy.principalOf(address(underlyingToken), user2), 2000e18);
-        assertEq(strategy.getTotalDeposited(address(underlyingToken)), 2000e18);
+        assertEq(strategy.principalOf(address(underlyingToken), user2), _haircut(2000e18));
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), _haircut(2000e18));
     }
 
     // ============ YIELD DISTRIBUTION TESTS ============
@@ -279,6 +409,12 @@ contract ERC4626MarketYieldStrategyTest is Test {
     /// @notice Test totalBalanceOf with no yield equals principalOf
     function testTotalBalanceOfNoYieldEqualsPrincipal() public {
         uint256 depositAmount = 1000e18;
+
+        // True no-slippage scenario: zero tolerance => no haircut buffer => no surplus (story 043).
+        // With a non-zero tolerance the haircut deliberately produces a buffer-as-yield, so
+        // totalBalanceOf would exceed principal; here we isolate the genuine full-credit case.
+        vm.prank(owner);
+        strategy.setSlippageTolerance(0);
 
         vm.prank(client);
         strategy.deposit(address(underlyingToken), depositAmount, user1);
@@ -476,12 +612,14 @@ contract ERC4626MarketYieldStrategyTest is Test {
         // Generate 10% yield
         erc4626Vault.simulateYield(1000e18);
 
+        uint256 credited = _haircut(depositAmount);
+
         vm.prank(withdrawer);
         strategy.skimSurplus(address(underlyingToken), withdrawer);
 
-        // Principal MUST NOT change; full surplus skimmed -> total ~= principal
-        assertEq(strategy.principalOf(address(underlyingToken), client), depositAmount);
-        assertApproxEqAbs(strategy.totalBalanceOf(address(underlyingToken), client), depositAmount, 2);
+        // Principal MUST NOT change (it is the haircut credit); full surplus skimmed -> total ~= principal
+        assertEq(strategy.principalOf(address(underlyingToken), client), credited);
+        assertApproxEqAbs(strategy.totalBalanceOf(address(underlyingToken), client), credited, 2);
     }
 
     /// @notice skimSurplus never modifies principal across repeated calls
@@ -501,12 +639,17 @@ contract ERC4626MarketYieldStrategyTest is Test {
             assertEq(strategy.principalOf(address(underlyingToken), client), principalBefore);
         }
 
-        assertEq(strategy.principalOf(address(underlyingToken), client), depositAmount);
+        // Principal stays at the haircut credit throughout (story 043).
+        assertEq(strategy.principalOf(address(underlyingToken), client), _haircut(depositAmount));
     }
 
     /// @notice skimSurplus is a no-op (no swap) when there is no surplus
     function testSkimSurplusNoSurplusNoOp() public {
         uint256 depositAmount = 10000e18;
+
+        // Zero tolerance => no haircut buffer => genuine no-surplus scenario (story 043).
+        vm.prank(owner);
+        strategy.setSlippageTolerance(0);
 
         vm.prank(client);
         strategy.deposit(address(underlyingToken), depositAmount, client);
@@ -577,7 +720,7 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(owner);
         strategy.depositAsOwner(address(underlyingToken), depositAmount, user1);
 
-        assertEq(strategy.principalOf(address(underlyingToken), user1), depositAmount);
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(depositAmount));
     }
 
     /// @notice Test depositAsOwner reverts for non-owner
@@ -602,7 +745,7 @@ contract ERC4626MarketYieldStrategyTest is Test {
 
         uint256 recipientBalanceAfter = underlyingToken.balanceOf(user2);
         assertGt(recipientBalanceAfter, recipientBalanceBefore);
-        assertEq(strategy.principalOf(address(underlyingToken), user1), 500e18);
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(depositAmount) - 500e18);
     }
 
     /// @notice Test withdrawAsOwner reverts for non-owner
@@ -626,7 +769,7 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(owner);
         strategy.depositAsOwner(address(underlyingToken), 1000e18, user1);
 
-        assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(1000e18));
     }
 
     /// @notice Test withdrawAsOwner works when paused
@@ -643,7 +786,7 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(owner);
         strategy.withdrawAsOwner(user1, owner, 500e18);
 
-        assertEq(strategy.principalOf(address(underlyingToken), user1), 500e18);
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(depositAmount) - 500e18);
     }
 
     // ============ VIEW FUNCTION TESTS ============
@@ -658,7 +801,8 @@ contract ERC4626MarketYieldStrategyTest is Test {
         strategy.deposit(address(underlyingToken), 2000e18, user2);
         vm.stopPrank();
 
-        assertEq(strategy.getTotalDeposited(address(underlyingToken)), 3000e18);
+        // Total tracks the sum of haircut credits (story 043).
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), _haircut(1000e18) + _haircut(2000e18));
     }
 
     function testGetTotalSharesTracksCorrectly() public {
@@ -678,11 +822,11 @@ contract ERC4626MarketYieldStrategyTest is Test {
         // Add yield to ensure they diverge from totalBalanceOf
         erc4626Vault.simulateYield(100e18);
 
-        // balanceOf should return principal, not total
+        // balanceOf should return principal (the haircut credit), not total
         assertEq(
             strategy.balanceOf(address(underlyingToken), user1), strategy.principalOf(address(underlyingToken), user1)
         );
-        assertEq(strategy.balanceOf(address(underlyingToken), user1), depositAmount);
+        assertEq(strategy.balanceOf(address(underlyingToken), user1), _haircut(depositAmount));
     }
 
     /// @notice Test principalOf reverts for wrong token
@@ -729,10 +873,10 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(client);
         strategy.deposit(address(underlyingToken), 1000e18, user1);
 
-        // Principal tracks input amount, not received shares
-        assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+        // Principal tracks the conservative haircut credit, not received shares (story 043)
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(1000e18));
 
-        // Should have more shares than a 1:1 deposit
+        // Should have more shares than a 1:1 deposit (favorable rate delivers more shares)
         assertGt(strategy.getTotalShares(), 1000e18);
     }
 
@@ -751,8 +895,8 @@ contract ERC4626MarketYieldStrategyTest is Test {
 
         uint256 received = underlyingToken.balanceOf(client) - balanceBefore;
 
-        // Principal decremented by requested 500, not received amount
-        assertEq(strategy.principalOf(address(underlyingToken), client), 500e18);
+        // Principal decremented by requested 500 from the haircut credit, not received amount
+        assertEq(strategy.principalOf(address(underlyingToken), client), _haircut(1000e18) - 500e18);
         // Received should be slightly less than requested
         assertLt(received, 500e18);
     }
@@ -822,8 +966,8 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(withdrawer);
         strategy.skimSurplus(address(underlyingToken), withdrawer);
 
-        assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
-        assertEq(strategy.principalOf(address(underlyingToken), user2), 2000e18);
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(1000e18));
+        assertEq(strategy.principalOf(address(underlyingToken), user2), _haircut(2000e18));
         assertEq(strategy.getTotalDeposited(address(underlyingToken)), totalDepositedBefore);
     }
 
@@ -866,11 +1010,15 @@ contract ERC4626MarketYieldStrategyTest is Test {
         strategy.skimSurplus(address(underlyingToken), withdrawer);
 
         assertEq(ammAdapter.swapCount() - swapsBefore, 1, "one swap despite zero-surplus clients");
-        assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+        assertEq(strategy.principalOf(address(underlyingToken), user1), _haircut(1000e18));
     }
 
     /// @notice No-op (no swap) when there is no surplus at all
     function testSkimSurplusNoSurplusNoSwap() public {
+        // Zero tolerance => no haircut buffer => genuine no-surplus scenario (story 043).
+        vm.prank(owner);
+        strategy.setSlippageTolerance(0);
+
         _authorizeAndDeposit(user1, 1000e18);
 
         uint256 swapsBefore = ammAdapter.swapCount();
@@ -947,6 +1095,10 @@ contract ERC4626MarketYieldStrategyTest is Test {
 
     /// @notice skimSurplus returns 0 when there is no surplus (no-op path, no swap)
     function testSkimSurplusReturnsZeroOnNoSurplus() public {
+        // Zero tolerance => no haircut buffer => genuine no-surplus scenario (story 043).
+        vm.prank(owner);
+        strategy.setSlippageTolerance(0);
+
         _authorizeAndDeposit(user1, 1000e18);
 
         vm.prank(withdrawer);

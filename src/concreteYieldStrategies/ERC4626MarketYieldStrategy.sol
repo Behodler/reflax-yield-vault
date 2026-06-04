@@ -55,7 +55,11 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
      * @param token The underlying token address
      * @param depositor The address that initiated the deposit (client or owner)
      * @param recipient The recipient of the deposited tokens (for accounting)
-     * @param amount The amount of underlying token deposited
+     * @param amount The NOMINAL amount of underlying token sent in by the depositor.
+     *        NOTE: this is the gross input, NOT the principal credited. Principal is credited
+     *        conservatively as the slippage-haircut value (`_creditedPrincipal(amount)` =
+     *        amount * (MAX_BPS - slippageToleranceBps) / MAX_BPS); the gap between nominal and
+     *        credited surfaces as protocol yield. Use `principalOf` for the recorded principal.
      * @param sharesReceived The amount of vault shares received from AMM swap
      */
     event Deposited(
@@ -194,6 +198,21 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         emit SlippageToleranceSet(oldBps, _bps);
     }
 
+    // ============ INTERNAL HELPERS ============
+
+    /**
+     * @notice Conservative principal credited for a nominal deposit `amount`.
+     * @param amount The nominal underlying amount sent by the depositor
+     * @return The slippage-haircut principal: amount * (MAX_BPS - slippageToleranceBps) / MAX_BPS
+     * @dev This is the worst-case fair value of the position the swap can return at the current
+     *      tolerance. The deposit's `minOut` is derived from this SAME value (via convertToShares),
+     *      so the credited principal and the swap floor can never drift apart — which is what makes
+     *      `fairValueOfShares >= creditedPrincipal` a provable solvency invariant.
+     */
+    function _creditedPrincipal(uint256 amount) internal view returns (uint256) {
+        return amount * (MAX_BPS - slippageToleranceBps) / MAX_BPS;
+    }
+
     // ============ EXTERNAL FUNCTIONS ============
 
     /**
@@ -272,9 +291,15 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         // Transfer underlying token from depositor to this contract
         underlyingToken.safeTransferFrom(depositor, address(this), amount);
 
-        // Calculate ideal shares and minimum acceptable output
-        uint256 idealShares = vault.convertToShares(amount);
-        uint256 minOut = idealShares * (MAX_BPS - slippageToleranceBps) / MAX_BPS;
+        // Conservative principal: credit the worst-case fair value of the position acquired, NOT the
+        // nominal amount. Tied to the same slippage bound the swap's minOut enforces, so fair value of
+        // shares received >= creditedPrincipal always. The gap between worst-case and actual execution
+        // surfaces as protocol yield.
+        uint256 creditedPrincipal = _creditedPrincipal(amount);
+
+        // Minimum acceptable swap output derived from the SAME haircut value, so the credit and the
+        // swap floor cannot drift apart (provable solvency invariant).
+        uint256 minOut = vault.convertToShares(creditedPrincipal);
 
         // Approve AMM adapter to spend underlying tokens
         underlyingToken.safeIncreaseAllowance(address(ammAdapter), amount);
@@ -283,10 +308,11 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         uint256 sharesReceived = ammAdapter.swap(address(underlyingToken), address(vault), amount, minOut);
         require(sharesReceived > 0, "ERC4626MarketYieldStrategy: no shares received");
 
-        // Update principal tracking
-        clientBalances[token][recipient] += amount;
-        totalDeposited[token] += amount;
+        // Update principal tracking with the conservative (haircut) credit, NOT the nominal amount.
+        clientBalances[token][recipient] += creditedPrincipal;
+        totalDeposited[token] += creditedPrincipal;
 
+        // Event emits the NOMINAL amount (gross input); credited principal is the haircut — see NatSpec.
         emit Deposited(token, depositor, recipient, amount, sharesReceived);
     }
 
