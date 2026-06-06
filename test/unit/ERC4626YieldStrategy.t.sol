@@ -92,6 +92,42 @@ contract ERC4626YieldStrategyTest is Test {
         assertEq(strategy.getTotalDeposited(address(underlyingToken)), deposit1 + deposit2 + deposit3);
     }
 
+    // ============ DEPOSIT RETURN VALUE TESTS (story 044) ============
+
+    /// @notice deposit() returns exactly the nominal amount (full-credit default) == principalOf delta.
+    function testDepositReturnsAmount() public {
+        uint256 amount = 1000e18;
+
+        uint256 principalBefore = strategy.principalOf(address(underlyingToken), user1);
+        uint256 totalBefore = strategy.getTotalDeposited(address(underlyingToken));
+
+        vm.prank(client);
+        uint256 credited = strategy.deposit(address(underlyingToken), amount, user1);
+
+        assertEq(credited, amount, "direct strategy returns the nominal amount");
+        assertEq(
+            credited,
+            strategy.principalOf(address(underlyingToken), user1) - principalBefore,
+            "return == principalOf delta"
+        );
+        assertEq(
+            credited,
+            strategy.getTotalDeposited(address(underlyingToken)) - totalBefore,
+            "return == getTotalDeposited delta"
+        );
+    }
+
+    /// @notice depositAsOwner() also returns the nominal amount for the direct strategy.
+    function testDepositAsOwnerReturnsAmount() public {
+        uint256 amount = 1000e18;
+
+        vm.prank(owner);
+        uint256 credited = strategy.depositAsOwner(address(underlyingToken), amount, user1);
+
+        assertEq(credited, amount, "depositAsOwner returns the nominal amount");
+        assertEq(credited, strategy.principalOf(address(underlyingToken), user1), "return == credited principal");
+    }
+
     // ============ totalBalanceOf() TESTS ============
 
     /// @notice Test totalBalanceOf() with no yield equals principalOf()

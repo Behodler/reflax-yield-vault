@@ -413,9 +413,14 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
      * @param token The token address to deposit
      * @param amount The amount of tokens to deposit
      * @param recipient The address that will own the deposited tokens
+     * @return creditedPrincipal The principal booked against `recipient` (see IYieldStrategy.deposit)
      * @dev Must be overridden by concrete contracts - implement onlyAuthorizedClient access control
      */
-    function deposit(address token, uint256 amount, address recipient) external virtual override;
+    function deposit(address token, uint256 amount, address recipient)
+        external
+        virtual
+        override
+        returns (uint256 creditedPrincipal);
 
     /**
      * @notice Withdraw tokens from the vault

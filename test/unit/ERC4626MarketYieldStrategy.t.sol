@@ -256,6 +256,70 @@ contract ERC4626MarketYieldStrategyTest is Test {
         );
     }
 
+    // ============ DEPOSIT RETURN VALUE TESTS (story 044) ============
+
+    /// @notice deposit() returns the credited principal == the story-043 haircut, not the nominal amount.
+    function testDepositReturnsCreditedPrincipalHaircut() public {
+        uint256 amount = 1000e18;
+
+        vm.prank(owner);
+        strategy.setSlippageTolerance(250); // 2.5%
+        uint256 bps = 250;
+
+        vm.prank(client);
+        uint256 credited = strategy.deposit(address(underlyingToken), amount, user1);
+
+        uint256 expected = amount * (strategy.MAX_BPS() - bps) / strategy.MAX_BPS();
+        assertEq(credited, expected, "return == haircut credited principal");
+        assertLt(credited, amount, "return is the haircut, strictly less than nominal");
+    }
+
+    /// @notice deposit() return value equals the increase in principalOf and getTotalDeposited.
+    function testDepositReturnEqualsPrincipalDelta() public {
+        uint256 amount = 777e18;
+
+        uint256 principalBefore = strategy.principalOf(address(underlyingToken), user1);
+        uint256 totalBefore = strategy.getTotalDeposited(address(underlyingToken));
+
+        vm.prank(client);
+        uint256 credited = strategy.deposit(address(underlyingToken), amount, user1);
+
+        uint256 principalDelta = strategy.principalOf(address(underlyingToken), user1) - principalBefore;
+        uint256 totalDelta = strategy.getTotalDeposited(address(underlyingToken)) - totalBefore;
+
+        assertEq(credited, principalDelta, "return == principalOf delta");
+        assertEq(credited, totalDelta, "return == getTotalDeposited delta");
+        assertEq(credited, _haircut(amount), "return == haircut");
+    }
+
+    /// @notice depositAsOwner() returns the same haircut credited principal as deposit().
+    function testDepositAsOwnerReturnsCreditedPrincipal() public {
+        uint256 amount = 1000e18;
+
+        vm.prank(owner);
+        uint256 credited = strategy.depositAsOwner(address(underlyingToken), amount, user1);
+
+        assertEq(credited, _haircut(amount), "depositAsOwner return == haircut");
+        assertEq(credited, strategy.principalOf(address(underlyingToken), user1), "return == credited principal");
+    }
+
+    /// @notice Better-than-worst-case AMM execution does not change the return: it tracks credited
+    ///         principal (the haircut), NOT shares received / mark-to-actual. Guards against anyone
+    ///         "fixing" the return to convertToAssets(sharesReceived).
+    function testDepositReturnTracksCreditedNotActual() public {
+        uint256 amount = 1000e18;
+        uint256 bps = strategy.slippageToleranceBps(); // 100 from setUp
+
+        // Near-ideal AMM rate (1:1, far better than the 1% worst case the haircut assumes).
+        ammAdapter.setExchangeRate(address(underlyingToken), address(erc4626Vault), 1e18);
+
+        vm.prank(client);
+        uint256 credited = strategy.deposit(address(underlyingToken), amount, user1);
+
+        uint256 expectedHaircut = amount * (strategy.MAX_BPS() - bps) / strategy.MAX_BPS();
+        assertEq(credited, expectedHaircut, "return tracks credited principal, not actual execution");
+    }
+
     // ============ WITHDRAW VIA AMM TESTS ============
 
     /// @notice Test withdraw via AMM swap returns correct amount and updates principal

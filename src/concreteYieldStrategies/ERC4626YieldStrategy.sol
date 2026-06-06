@@ -184,8 +184,9 @@ contract ERC4626YieldStrategy is AYieldStrategy {
         onlyAuthorizedClient
         nonReentrant
         whenNotPaused
+        returns (uint256 creditedPrincipal)
     {
-        _depositInternal(token, amount, recipient, msg.sender);
+        return _depositInternal(token, amount, recipient, msg.sender);
     }
 
     /**
@@ -215,8 +216,13 @@ contract ERC4626YieldStrategy is AYieldStrategy {
      * @dev Does NOT have whenNotPaused — owner should be able to act in emergencies.
      *      Tokens are transferred from msg.sender (the owner).
      */
-    function depositAsOwner(address token, uint256 amount, address client) external onlyOwner nonReentrant {
-        _depositInternal(token, amount, client, msg.sender);
+    function depositAsOwner(address token, uint256 amount, address client)
+        external
+        onlyOwner
+        nonReentrant
+        returns (uint256 creditedPrincipal)
+    {
+        return _depositInternal(token, amount, client, msg.sender);
     }
 
     /**
@@ -239,8 +245,12 @@ contract ERC4626YieldStrategy is AYieldStrategy {
      * @param amount The amount of underlying tokens to deposit
      * @param recipient The address credited in accounting (clientBalances)
      * @param depositor The address tokens are transferred from
+     * @return creditedPrincipal The principal booked against `recipient` — the full nominal `amount`
      */
-    function _depositInternal(address token, uint256 amount, address recipient, address depositor) internal {
+    function _depositInternal(address token, uint256 amount, address recipient, address depositor)
+        internal
+        returns (uint256 creditedPrincipal)
+    {
         require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
         require(amount > 0, "ERC4626YieldStrategy: amount must be greater than zero");
         require(recipient != address(0), "ERC4626YieldStrategy: recipient cannot be zero address");
@@ -257,6 +267,9 @@ contract ERC4626YieldStrategy is AYieldStrategy {
         totalDeposited[token] += amount;
 
         emit Deposited(token, depositor, recipient, amount, sharesReceived);
+
+        // Full-credit default: the booked principal equals the nominal amount.
+        creditedPrincipal = amount;
     }
 
     /**

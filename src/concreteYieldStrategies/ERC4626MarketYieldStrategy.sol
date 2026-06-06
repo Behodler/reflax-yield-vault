@@ -228,8 +228,9 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         onlyAuthorizedClient
         nonReentrant
         whenNotPaused
+        returns (uint256 creditedPrincipal)
     {
-        _depositInternal(token, amount, recipient, msg.sender);
+        return _depositInternal(token, amount, recipient, msg.sender);
     }
 
     /**
@@ -258,8 +259,13 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
      * @dev Does NOT have whenNotPaused -- owner should be able to act in emergencies.
      *      Tokens are transferred from msg.sender (the owner).
      */
-    function depositAsOwner(address token, uint256 amount, address client) external onlyOwner nonReentrant {
-        _depositInternal(token, amount, client, msg.sender);
+    function depositAsOwner(address token, uint256 amount, address client)
+        external
+        onlyOwner
+        nonReentrant
+        returns (uint256 creditedPrincipal)
+    {
+        return _depositInternal(token, amount, client, msg.sender);
     }
 
     /**
@@ -282,8 +288,12 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
      * @param amount The amount of underlying tokens to deposit
      * @param recipient The address credited in accounting (clientBalances)
      * @param depositor The address tokens are transferred from
+     * @return creditedPrincipal The conservative (haircut) principal booked against `recipient`
      */
-    function _depositInternal(address token, uint256 amount, address recipient, address depositor) internal {
+    function _depositInternal(address token, uint256 amount, address recipient, address depositor)
+        internal
+        returns (uint256 creditedPrincipal)
+    {
         require(token == address(underlyingToken), "ERC4626MarketYieldStrategy: only underlying token supported");
         require(amount > 0, "ERC4626MarketYieldStrategy: amount must be greater than zero");
         require(recipient != address(0), "ERC4626MarketYieldStrategy: recipient cannot be zero address");
@@ -295,7 +305,7 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         // nominal amount. Tied to the same slippage bound the swap's minOut enforces, so fair value of
         // shares received >= creditedPrincipal always. The gap between worst-case and actual execution
         // surfaces as protocol yield.
-        uint256 creditedPrincipal = _creditedPrincipal(amount);
+        creditedPrincipal = _creditedPrincipal(amount);
 
         // Minimum acceptable swap output derived from the SAME haircut value, so the credit and the
         // swap floor cannot drift apart (provable solvency invariant).

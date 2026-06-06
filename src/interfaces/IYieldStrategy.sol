@@ -11,8 +11,17 @@ interface IYieldStrategy {
      * @param token The token address to deposit
      * @param amount The amount of tokens to deposit
      * @param recipient The address that will own the deposited tokens
+     * @return creditedPrincipal The principal actually booked against `recipient`
+     *         (`clientBalances` / `totalDeposited`). This is the credited principal, NOT the
+     *         nominal `amount` echoed in the `Deposited` event:
+     *           - Direct (full-credit) strategies return `amount`.
+     *           - The market strategy returns the story-043 slippage haircut
+     *             (`amount * (MAX_BPS - slippageToleranceBps) / MAX_BPS`), which is < `amount`.
+     *         It is NOT a mark-to-actual figure (e.g. shares received valued at the current rate);
+     *         it tracks booked principal so a caller can mirror the strategy's ledger exactly.
+     *         Callers may discard it; existing callers that ignore the return are unaffected.
      */
-    function deposit(address token, uint256 amount, address recipient) external;
+    function deposit(address token, uint256 amount, address recipient) external returns (uint256 creditedPrincipal);
 
     /**
      * @notice Withdraw tokens from the vault
