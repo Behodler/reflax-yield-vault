@@ -723,13 +723,13 @@ contract ERC4626YieldStrategyTest is Test {
 
     function testPrincipalOfWrongToken() public {
         MockERC20 wrongToken = new MockERC20("Wrong", "WRONG", 18);
-        vm.expectRevert("ERC4626YieldStrategy: only underlying token supported");
+        vm.expectRevert("AYieldStrategy: only underlying token supported");
         strategy.principalOf(address(wrongToken), user1);
     }
 
     function testTotalBalanceOfWrongToken() public {
         MockERC20 wrongToken = new MockERC20("Wrong", "WRONG", 18);
-        vm.expectRevert("ERC4626YieldStrategy: only underlying token supported");
+        vm.expectRevert("AYieldStrategy: only underlying token supported");
         strategy.totalBalanceOf(address(wrongToken), user1);
     }
 
@@ -1164,10 +1164,14 @@ contract ERC4626YieldStrategyTest is Test {
         strategy.relinquishPrincipal(address(underlyingToken), relinquish);
 
         assertEq(
-            strategy.principalOf(address(underlyingToken), user1), principalBefore - relinquish, "principal drops exactly"
+            strategy.principalOf(address(underlyingToken), user1),
+            principalBefore - relinquish,
+            "principal drops exactly"
         );
         assertEq(
-            strategy.getTotalDeposited(address(underlyingToken)), totalBefore - relinquish, "totalDeposited drops exactly"
+            strategy.getTotalDeposited(address(underlyingToken)),
+            totalBefore - relinquish,
+            "totalDeposited drops exactly"
         );
     }
 
@@ -1214,11 +1218,7 @@ contract ERC4626YieldStrategyTest is Test {
         erc4626Vault.simulateLoss(400e18);
 
         // No surplus exists while underwater
-        assertEq(
-            strategy.totalBalanceOf(address(underlyingToken), user1),
-            600e18,
-            "underwater value < principal"
-        );
+        assertEq(strategy.totalBalanceOf(address(underlyingToken), user1), 600e18, "underwater value < principal");
 
         // Client relinquishes the dormant 400 of principal (already covered by its buffer)
         vm.prank(user1);
@@ -1261,7 +1261,7 @@ contract ERC4626YieldStrategyTest is Test {
     function testRelinquishPrincipalRevertsZeroAmount() public {
         _authorizeAndDeposit(user1, 1000e18);
         vm.prank(user1);
-        vm.expectRevert("ERC4626YieldStrategy: amount must be greater than zero");
+        vm.expectRevert("AYieldStrategy: amount must be greater than zero");
         strategy.relinquishPrincipal(address(underlyingToken), 0);
     }
 
@@ -1269,7 +1269,7 @@ contract ERC4626YieldStrategyTest is Test {
     function testRelinquishPrincipalRevertsWrongToken() public {
         _authorizeAndDeposit(user1, 1000e18);
         vm.prank(user1);
-        vm.expectRevert("ERC4626YieldStrategy: only underlying token supported");
+        vm.expectRevert("AYieldStrategy: only underlying token supported");
         strategy.relinquishPrincipal(address(0xBAD), 100e18);
     }
 

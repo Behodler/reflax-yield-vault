@@ -896,27 +896,27 @@ contract ERC4626MarketYieldStrategyTest is Test {
     /// @notice Test principalOf reverts for wrong token
     function testPrincipalOfWrongToken() public {
         MockERC20 wrongToken = new MockERC20("Wrong", "WRONG", 18);
-        vm.expectRevert("ERC4626MarketYieldStrategy: only underlying token supported");
+        vm.expectRevert("AYieldStrategy: only underlying token supported");
         strategy.principalOf(address(wrongToken), user1);
     }
 
     /// @notice Test totalBalanceOf reverts for wrong token
     function testTotalBalanceOfWrongToken() public {
         MockERC20 wrongToken = new MockERC20("Wrong", "WRONG", 18);
-        vm.expectRevert("ERC4626MarketYieldStrategy: only underlying token supported");
+        vm.expectRevert("AYieldStrategy: only underlying token supported");
         strategy.totalBalanceOf(address(wrongToken), user1);
     }
 
     // ============ CONSTRUCTOR VALIDATION TESTS ============
 
     function testConstructorRevertsZeroUnderlying() public {
-        vm.expectRevert("ERC4626MarketYieldStrategy: underlying token cannot be zero address");
+        vm.expectRevert("AYieldStrategy: underlying token cannot be zero address");
         vm.prank(owner);
         new ERC4626MarketYieldStrategy(owner, address(0), address(erc4626Vault), address(ammAdapter));
     }
 
     function testConstructorRevertsZeroVault() public {
-        vm.expectRevert("ERC4626MarketYieldStrategy: vault cannot be zero address");
+        vm.expectRevert("AYieldStrategy: vault cannot be zero address");
         vm.prank(owner);
         new ERC4626MarketYieldStrategy(owner, address(underlyingToken), address(0), address(ammAdapter));
     }
@@ -1398,10 +1398,14 @@ contract ERC4626MarketYieldStrategyTest is Test {
         strategy.relinquishPrincipal(address(underlyingToken), relinquish);
 
         assertEq(
-            strategy.principalOf(address(underlyingToken), user1), principalBefore - relinquish, "principal drops exactly"
+            strategy.principalOf(address(underlyingToken), user1),
+            principalBefore - relinquish,
+            "principal drops exactly"
         );
         assertEq(
-            strategy.getTotalDeposited(address(underlyingToken)), totalBefore - relinquish, "totalDeposited drops exactly"
+            strategy.getTotalDeposited(address(underlyingToken)),
+            totalBefore - relinquish,
+            "totalDeposited drops exactly"
         );
     }
 
@@ -1440,12 +1444,12 @@ contract ERC4626MarketYieldStrategyTest is Test {
 
         // zero amount
         vm.prank(user1);
-        vm.expectRevert("ERC4626MarketYieldStrategy: amount must be greater than zero");
+        vm.expectRevert("AYieldStrategy: amount must be greater than zero");
         strategy.relinquishPrincipal(address(underlyingToken), 0);
 
         // wrong token
         vm.prank(user1);
-        vm.expectRevert("ERC4626MarketYieldStrategy: only underlying token supported");
+        vm.expectRevert("AYieldStrategy: only underlying token supported");
         strategy.relinquishPrincipal(address(0xBAD), 100e18);
 
         // unauthorized caller

@@ -4,7 +4,6 @@ pragma solidity ^0.8.13;
 import "../AYieldStrategy.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 /**
  * @title ERC4626YieldStrategy
@@ -26,20 +25,6 @@ import "@openzeppelin/contracts/interfaces/IERC4626.sol";
  */
 contract ERC4626YieldStrategy is AYieldStrategy {
     using SafeERC20 for IERC20;
-
-    // ============ STATE VARIABLES ============
-
-    /// @notice The underlying token this strategy accepts (e.g., BOLD, USDS)
-    IERC20 public immutable underlyingToken;
-
-    /// @notice The external ERC4626 vault this strategy deposits into
-    IERC4626 public immutable vault;
-
-    /// @notice Tracks each client's deposited principal per token
-    mapping(address => mapping(address => uint256)) private clientBalances;
-
-    /// @notice Tracks total deposited principal across all clients per token
-    mapping(address => uint256) private totalDeposited;
 
     // ============ EVENTS ============
 
@@ -83,197 +68,14 @@ contract ERC4626YieldStrategy is AYieldStrategy {
      * @param _underlyingToken The underlying token address (e.g., BOLD, USDS)
      * @param _erc4626Vault The ERC4626 vault address
      */
-    constructor(address _owner, address _underlyingToken, address _erc4626Vault) AYieldStrategy(_owner) {
-        require(_underlyingToken != address(0), "ERC4626YieldStrategy: underlying token cannot be zero address");
-        require(_erc4626Vault != address(0), "ERC4626YieldStrategy: vault cannot be zero address");
-
-        underlyingToken = IERC20(_underlyingToken);
-        vault = IERC4626(_erc4626Vault);
-
+    constructor(address _owner, address _underlyingToken, address _erc4626Vault)
+        AYieldStrategy(_owner, _underlyingToken, _erc4626Vault)
+    {
         // Approve vault to spend unlimited underlying tokens
         IERC20(_underlyingToken).approve(_erc4626Vault, type(uint256).max);
     }
 
-    // ============ PUBLIC VIEW FUNCTIONS ============
-
-    /**
-     * @notice Returns the underlying token address this strategy accepts
-     * @return The address of the underlying token
-     */
-    function underlying() external view returns (address) {
-        return address(underlyingToken);
-    }
-
-    /**
-     * @notice Get principal balance (amount deposited, excluding yield)
-     * @param token The token address (must be underlying token)
-     * @param account The account address
-     * @return The principal amount deposited (excluding yield)
-     */
-    function principalOf(address token, address account) external view override returns (uint256) {
-        require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
-        return clientBalances[token][account];
-    }
-
-    /**
-     * @notice Get total balance including proportional yield
-     * @param token The token address (must be underlying token)
-     * @param account The account address
-     * @return The total balance including principal and accumulated yield
-     * @dev Calculates user's proportional share of total vault value:
-     *      (totalVaultValue * userPrincipal) / totalDeposited
-     */
-    function totalBalanceOf(address token, address account) external view override returns (uint256) {
-        require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
-
-        uint256 principal = clientBalances[token][account];
-        if (principal == 0 || totalDeposited[token] == 0) {
-            return 0;
-        }
-
-        // Calculate proportional share of total vault value
-        uint256 totalShares = vault.balanceOf(address(this));
-        uint256 totalValue = vault.convertToAssets(totalShares);
-
-        // User's proportion: (userPrincipal / totalPrincipal) * totalValue
-        return (totalValue * principal) / totalDeposited[token];
-    }
-
-    /**
-     * @notice Get balance (returns principal for backward compatibility)
-     * @param token The token address
-     * @param account The account address
-     * @return The principal balance
-     * @dev DEPRECATED: Use principalOf() or totalBalanceOf() explicitly.
-     *      Kept for backward compatibility. Returns principal only.
-     */
-    function balanceOf(address token, address account) external view override returns (uint256) {
-        return this.principalOf(token, account);
-    }
-
-    /**
-     * @notice Get the total amount of underlying token deposited by all clients
-     * @param token The token address
-     * @return The total amount of underlying token deposited
-     */
-    function getTotalDeposited(address token) external view returns (uint256) {
-        return totalDeposited[token];
-    }
-
-    /**
-     * @notice Get the total vault shares held directly by this strategy
-     * @return The total amount of vault shares
-     */
-    function getTotalShares() external view returns (uint256) {
-        return vault.balanceOf(address(this));
-    }
-
-    // ============ EXTERNAL FUNCTIONS ============
-
-    /**
-     * @notice Deposit underlying tokens into the ERC4626 vault
-     * @param token The token address (must be underlying token)
-     * @param amount The amount of underlying tokens to deposit
-     * @param recipient The address that will own the deposited tokens (for accounting)
-     * @dev Only authorized clients can call this function.
-     *      WARNING: Rebasing vaults are NOT supported.
-     */
-    function deposit(address token, uint256 amount, address recipient)
-        external
-        override
-        onlyAuthorizedClient
-        nonReentrant
-        whenNotPaused
-        returns (uint256 creditedPrincipal)
-    {
-        return _depositInternal(token, amount, recipient, msg.sender);
-    }
-
-    /**
-     * @notice Withdraw underlying tokens from the ERC4626 vault
-     * @param token The token address (must be underlying token)
-     * @param amount The amount of underlying tokens to withdraw (principal only)
-     * @param recipient The address that will receive the tokens
-     * @dev Only authorized clients can call this function.
-     *      Uses redeem() for deterministic share burning. Rounding favors protocol.
-     *      In the standard withdraw flow, the recipient is also the balance holder.
-     */
-    function withdraw(address token, uint256 amount, address recipient)
-        external
-        override
-        onlyAuthorizedClient
-        nonReentrant
-        whenNotPaused
-    {
-        _withdrawInternal(token, amount, recipient, recipient);
-    }
-
-    /**
-     * @notice Owner-only deposit on behalf of a client, bypassing client authorization
-     * @param token The token address (must be underlying token)
-     * @param amount The amount of underlying tokens to deposit
-     * @param client The client address whose balance will be credited
-     * @dev Does NOT have whenNotPaused — owner should be able to act in emergencies.
-     *      Tokens are transferred from msg.sender (the owner).
-     */
-    function depositAsOwner(address token, uint256 amount, address client)
-        external
-        onlyOwner
-        nonReentrant
-        returns (uint256 creditedPrincipal)
-    {
-        return _depositInternal(token, amount, client, msg.sender);
-    }
-
-    /**
-     * @notice Owner-only withdrawal on behalf of a client, bypassing client authorization
-     * @param client The client address whose balance will be debited
-     * @param recipient The address that will receive the withdrawn tokens
-     * @param amount The amount to withdraw from the client's principal
-     * @dev Does NOT have whenNotPaused — owner should be able to act in emergencies.
-     *      The client's balance is debited; the recipient receives the tokens.
-     */
-    function withdrawAsOwner(address client, address recipient, uint256 amount) external onlyOwner nonReentrant {
-        _withdrawInternal(address(underlyingToken), amount, recipient, client);
-    }
-
-    /// @inheritdoc IYieldStrategy
-    function relinquishPrincipal(address token, uint256 amount) external override onlyAuthorizedClient nonReentrant {
-        _relinquishInternal(token, msg.sender, amount);
-    }
-
-    /// @inheritdoc IYieldStrategy
-    function relinquishPrincipalAsOwner(address client, uint256 amount) external override onlyOwner nonReentrant {
-        _relinquishInternal(address(underlyingToken), client, amount);
-    }
-
-    // ============ INTERNAL SHARED LOGIC ============
-
-    /**
-     * @notice Shared write-down logic for relinquishPrincipal() and relinquishPrincipalAsOwner().
-     * @param token The token address (must be underlying token)
-     * @param balanceHolder The address whose recorded principal is written down.
-     * @param amount The principal amount to write down (capped to the holder's available principal).
-     * @dev Decrements BOTH clientBalances and totalDeposited by the same (capped) amount and touches
-     *      the underlying vault's shares in NO way — no deposit/redeem/withdraw/transfer.
-     */
-    function _relinquishInternal(address token, address balanceHolder, uint256 amount) internal {
-        require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
-        require(amount > 0, "ERC4626YieldStrategy: amount must be greater than zero");
-
-        // Cap to the holder's available principal (mirrors withdraw; protocol-favouring).
-        uint256 available = clientBalances[token][balanceHolder];
-        if (amount > available) {
-            amount = available;
-        }
-        require(amount > 0, "ERC4626YieldStrategy: no principal to relinquish");
-
-        // Write down recorded principal ONLY — vault shares are deliberately untouched.
-        clientBalances[token][balanceHolder] -= amount;
-        totalDeposited[token] -= amount;
-
-        emit PrincipalRelinquished(token, balanceHolder, amount, clientBalances[token][balanceHolder]);
-    }
+    // ============ INTERNAL VAULT-INTERACTION HOOKS ============
 
     /**
      * @notice Internal deposit logic shared between deposit() and depositAsOwner()
@@ -285,6 +87,7 @@ contract ERC4626YieldStrategy is AYieldStrategy {
      */
     function _depositInternal(address token, uint256 amount, address recipient, address depositor)
         internal
+        override
         returns (uint256 creditedPrincipal)
     {
         require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
@@ -317,7 +120,10 @@ contract ERC4626YieldStrategy is AYieldStrategy {
      * @dev For standard withdraw(), recipient == balanceHolder.
      *      For withdrawAsOwner(), the client's balance is debited but a different recipient receives tokens.
      */
-    function _withdrawInternal(address token, uint256 amount, address recipient, address balanceHolder) internal {
+    function _withdrawInternal(address token, uint256 amount, address recipient, address balanceHolder)
+        internal
+        override
+    {
         require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
         require(amount > 0, "ERC4626YieldStrategy: amount must be greater than zero");
         require(recipient != address(0), "ERC4626YieldStrategy: recipient cannot be zero address");
