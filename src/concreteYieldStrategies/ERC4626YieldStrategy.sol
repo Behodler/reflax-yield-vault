@@ -237,7 +237,43 @@ contract ERC4626YieldStrategy is AYieldStrategy {
         _withdrawInternal(address(underlyingToken), amount, recipient, client);
     }
 
+    /// @inheritdoc IYieldStrategy
+    function relinquishPrincipal(address token, uint256 amount) external override onlyAuthorizedClient nonReentrant {
+        _relinquishInternal(token, msg.sender, amount);
+    }
+
+    /// @inheritdoc IYieldStrategy
+    function relinquishPrincipalAsOwner(address client, uint256 amount) external override onlyOwner nonReentrant {
+        _relinquishInternal(address(underlyingToken), client, amount);
+    }
+
     // ============ INTERNAL SHARED LOGIC ============
+
+    /**
+     * @notice Shared write-down logic for relinquishPrincipal() and relinquishPrincipalAsOwner().
+     * @param token The token address (must be underlying token)
+     * @param balanceHolder The address whose recorded principal is written down.
+     * @param amount The principal amount to write down (capped to the holder's available principal).
+     * @dev Decrements BOTH clientBalances and totalDeposited by the same (capped) amount and touches
+     *      the underlying vault's shares in NO way — no deposit/redeem/withdraw/transfer.
+     */
+    function _relinquishInternal(address token, address balanceHolder, uint256 amount) internal {
+        require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
+        require(amount > 0, "ERC4626YieldStrategy: amount must be greater than zero");
+
+        // Cap to the holder's available principal (mirrors withdraw; protocol-favouring).
+        uint256 available = clientBalances[token][balanceHolder];
+        if (amount > available) {
+            amount = available;
+        }
+        require(amount > 0, "ERC4626YieldStrategy: no principal to relinquish");
+
+        // Write down recorded principal ONLY — vault shares are deliberately untouched.
+        clientBalances[token][balanceHolder] -= amount;
+        totalDeposited[token] -= amount;
+
+        emit PrincipalRelinquished(token, balanceHolder, amount, clientBalances[token][balanceHolder]);
+    }
 
     /**
      * @notice Internal deposit logic shared between deposit() and depositAsOwner()

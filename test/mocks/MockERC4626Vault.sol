@@ -155,6 +155,21 @@ contract MockERC4626Vault is MockERC20 {
         _totalAssets += yieldAmount;
     }
 
+    /// @notice Simulate a vault loss (underwater) by decreasing total assets and burning backing,
+    ///         without changing share supply. The inverse of simulateYield. Underflow-guarded:
+    ///         caps the loss to the available assets/backing.
+    function simulateLoss(uint256 lossAmount) external {
+        if (lossAmount > _totalAssets) {
+            lossAmount = _totalAssets;
+        }
+        uint256 backing = MockERC20(_asset).balanceOf(address(this));
+        uint256 toBurn = lossAmount > backing ? backing : lossAmount;
+        if (toBurn > 0) {
+            MockERC20(_asset).burn(address(this), toBurn);
+        }
+        _totalAssets -= lossAmount;
+    }
+
     /// @notice Set deposit fee in basis points (e.g., 100 = 1%)
     function setFeeBps(uint256 newFeeBps) external {
         require(newFeeBps <= 10000, "MockERC4626Vault: fee exceeds 100%");

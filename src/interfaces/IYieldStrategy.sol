@@ -31,6 +31,20 @@ interface IYieldStrategy {
      */
     function withdraw(address token, uint256 amount, address recipient) external;
 
+    /// @notice Write down the caller's own recorded principal by `amount`, WITHOUT touching the
+    ///         underlying vault's shares (no redeem/withdraw/transfer). Decrements both
+    ///         clientBalances[token][msg.sender] and totalDeposited[token], preserving the
+    ///         invariant totalDeposited == Σ clientBalances. Intended for a principal-only client
+    ///         (e.g. the stable-staker) to release dormant principal so the corresponding vault value
+    ///         flows to yield on recovery rather than remaining a principal claim. Over-requests are
+    ///         capped to the caller's available principal. Client-gated (onlyAuthorizedClient).
+    function relinquishPrincipal(address token, uint256 amount) external;
+
+    /// @notice Owner-only override: write down a named `client`'s recorded principal by `amount`
+    ///         on the underlying token, with identical semantics to relinquishPrincipal (no vault
+    ///         interaction, both maps decremented, over-requests capped). Mirrors withdrawAsOwner.
+    function relinquishPrincipalAsOwner(address client, uint256 amount) external;
+
     /**
      * @notice Get the balance of a token for a specific address
      * @param token The token address

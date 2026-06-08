@@ -99,6 +99,16 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     );
 
     /**
+     * @notice Emitted when a client's recorded principal is written down without redeeming shares
+     *         (via client-initiated relinquishPrincipal or owner-initiated relinquishPrincipalAsOwner).
+     * @param token The underlying token.
+     * @param client The client whose principal was written down.
+     * @param amount The principal amount written down.
+     * @param newPrincipal The client's remaining recorded principal after the write-down.
+     */
+    event PrincipalRelinquished(address indexed token, address indexed client, uint256 amount, uint256 newPrincipal);
+
+    /**
      * @notice Emitted when an emergency withdrawal is performed
      * @param owner The owner who performed the withdrawal
      * @param amount The amount withdrawn
@@ -430,6 +440,24 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
      * @dev Must be overridden by concrete contracts - implement onlyAuthorizedClient access control
      */
     function withdraw(address token, uint256 amount, address recipient) external virtual override;
+
+    /**
+     * @notice Write down the caller's own recorded principal without touching vault shares
+     * @param token The token address to relinquish principal for
+     * @param amount The principal amount to write down (capped to available)
+     * @dev Must be overridden by concrete contracts - implement onlyAuthorizedClient access control.
+     *      Storage (clientBalances/totalDeposited) lives in the concrete strategies, so this cannot
+     *      have a working default body — same pattern as deposit/withdraw.
+     */
+    function relinquishPrincipal(address token, uint256 amount) external virtual override;
+
+    /**
+     * @notice Owner-only override to write down a named client's recorded principal
+     * @param client The client whose recorded principal is written down
+     * @param amount The principal amount to write down (capped to available)
+     * @dev Must be overridden by concrete contracts - implement onlyOwner access control.
+     */
+    function relinquishPrincipalAsOwner(address client, uint256 amount) external virtual override;
 
     // ============ INTERNAL HELPER FUNCTIONS ============
 

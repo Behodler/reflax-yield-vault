@@ -1145,4 +1145,200 @@ contract ERC4626YieldStrategyTest is Test {
         // The fresh deposit increased user1's attributed surplus (and thus its 100% set-aside)
         assertGt(s1After, s1Before, "front-run raises depositing client's attributed surplus");
     }
+
+    // ============ relinquishPrincipal TESTS (story 045) ============
+
+    /// @dev Local copy of the event for vm.expectEmit matching.
+    event PrincipalRelinquished(address indexed token, address indexed client, uint256 amount, uint256 newPrincipal);
+
+    /// @notice Happy path: relinquishing part of principal drops principalOf and getTotalDeposited
+    ///         by exactly `amount`.
+    function testRelinquishPrincipalHappyPath() public {
+        _authorizeAndDeposit(user1, 1000e18);
+
+        uint256 principalBefore = strategy.principalOf(address(underlyingToken), user1);
+        uint256 totalBefore = strategy.getTotalDeposited(address(underlyingToken));
+        uint256 relinquish = 400e18;
+
+        vm.prank(user1);
+        strategy.relinquishPrincipal(address(underlyingToken), relinquish);
+
+        assertEq(
+            strategy.principalOf(address(underlyingToken), user1), principalBefore - relinquish, "principal drops exactly"
+        );
+        assertEq(
+            strategy.getTotalDeposited(address(underlyingToken)), totalBefore - relinquish, "totalDeposited drops exactly"
+        );
+    }
+
+    /// @notice Shares are untouched by relinquish: getTotalShares and vault.balanceOf identical.
+    function testRelinquishPrincipalDoesNotTouchShares() public {
+        _authorizeAndDeposit(user1, 1000e18);
+
+        uint256 sharesBefore = strategy.getTotalShares();
+        uint256 vaultBalBefore = erc4626Vault.balanceOf(address(strategy));
+
+        vm.prank(user1);
+        strategy.relinquishPrincipal(address(underlyingToken), 400e18);
+
+        assertEq(strategy.getTotalShares(), sharesBefore, "getTotalShares unchanged");
+        assertEq(erc4626Vault.balanceOf(address(strategy)), vaultBalBefore, "vault share balance unchanged");
+    }
+
+    /// @notice Invariant totalDeposited == Σ clientBalances holds after relinquish, single & multi client.
+    function testRelinquishPrincipalPreservesInvariant() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        _authorizeAndDeposit(user2, 2000e18);
+
+        vm.prank(user1);
+        strategy.relinquishPrincipal(address(underlyingToken), 300e18);
+
+        uint256 sumBalances = strategy.principalOf(address(underlyingToken), user1)
+            + strategy.principalOf(address(underlyingToken), user2);
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), sumBalances, "invariant holds multi-client");
+
+        // Now drive single-client: relinquish all of user2
+        vm.prank(user2);
+        strategy.relinquishPrincipal(address(underlyingToken), 2000e18);
+        sumBalances = strategy.principalOf(address(underlyingToken), user1)
+            + strategy.principalOf(address(underlyingToken), user2);
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), sumBalances, "invariant holds after second");
+    }
+
+    /// @notice Underwater -> relinquish dormant principal -> recovery -> recovered value flows to yield.
+    function testRelinquishUnderwaterThenRecoveryFlowsToYield() public {
+        // Single principal client (the stable-staker model)
+        _authorizeAndDeposit(user1, 1000e18);
+
+        // Vault goes underwater: lose 400 of the 1000 deposited
+        erc4626Vault.simulateLoss(400e18);
+
+        // No surplus exists while underwater
+        assertEq(
+            strategy.totalBalanceOf(address(underlyingToken), user1),
+            600e18,
+            "underwater value < principal"
+        );
+
+        // Client relinquishes the dormant 400 of principal (already covered by its buffer)
+        vm.prank(user1);
+        strategy.relinquishPrincipal(address(underlyingToken), 400e18);
+
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), 600e18, "totalDeposited written down");
+
+        // Vault recovers back to 1000 of value (add 400 back)
+        erc4626Vault.simulateYield(400e18);
+
+        // The recovered value above the now-smaller principal is skimmable surplus
+        uint256 surplus = strategy.totalBalanceOf(address(underlyingToken), user1)
+            - strategy.principalOf(address(underlyingToken), user1);
+        assertApproxEqAbs(surplus, 400e18, 2, "recovered value now appears as surplus, not principal");
+
+        uint256 recipientBefore = underlyingToken.balanceOf(withdrawer);
+        vm.prank(withdrawer);
+        uint256 skimmed = strategy.skimSurplus(address(underlyingToken), withdrawer);
+        assertApproxEqAbs(skimmed, 400e18, 2, "skim returns the recovered (now-yield) value");
+        assertApproxEqAbs(
+            underlyingToken.balanceOf(withdrawer) - recipientBefore, 400e18, 2, "recipient received the recovered value"
+        );
+    }
+
+    /// @notice Over-request is capped to available principal (no revert); principal floors at 0; shares untouched.
+    function testRelinquishPrincipalOverRequestCapped() public {
+        _authorizeAndDeposit(user1, 1000e18);
+
+        uint256 sharesBefore = strategy.getTotalShares();
+
+        vm.prank(user1);
+        strategy.relinquishPrincipal(address(underlyingToken), 5000e18); // way more than available
+
+        assertEq(strategy.principalOf(address(underlyingToken), user1), 0, "principal floors at 0");
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), 0, "totalDeposited floors at 0");
+        assertEq(strategy.getTotalShares(), sharesBefore, "shares untouched on over-request");
+    }
+
+    /// @notice Reverts: amount == 0.
+    function testRelinquishPrincipalRevertsZeroAmount() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        vm.prank(user1);
+        vm.expectRevert("ERC4626YieldStrategy: amount must be greater than zero");
+        strategy.relinquishPrincipal(address(underlyingToken), 0);
+    }
+
+    /// @notice Reverts: wrong token.
+    function testRelinquishPrincipalRevertsWrongToken() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        vm.prank(user1);
+        vm.expectRevert("ERC4626YieldStrategy: only underlying token supported");
+        strategy.relinquishPrincipal(address(0xBAD), 100e18);
+    }
+
+    /// @notice Reverts: caller not an authorized client.
+    function testRelinquishPrincipalRevertsUnauthorized() public {
+        vm.prank(randomUser);
+        vm.expectRevert("AYieldStrategy: unauthorized, only authorized clients");
+        strategy.relinquishPrincipal(address(underlyingToken), 100e18);
+    }
+
+    /// @notice Works while paused (not whenNotPaused-gated).
+    function testRelinquishPrincipalWorksWhilePaused() public {
+        _authorizeAndDeposit(user1, 1000e18);
+
+        vm.prank(pauser);
+        strategy.pause();
+
+        vm.prank(user1);
+        strategy.relinquishPrincipal(address(underlyingToken), 400e18);
+
+        assertEq(strategy.principalOf(address(underlyingToken), user1), 600e18, "relinquish succeeded while paused");
+    }
+
+    /// @notice PrincipalRelinquished event emitted with correct (token, client, amount, newPrincipal).
+    function testRelinquishPrincipalEmitsEvent() public {
+        _authorizeAndDeposit(user1, 1000e18);
+
+        vm.expectEmit(true, true, false, true, address(strategy));
+        emit PrincipalRelinquished(address(underlyingToken), user1, 400e18, 600e18);
+
+        vm.prank(user1);
+        strategy.relinquishPrincipal(address(underlyingToken), 400e18);
+    }
+
+    // ---- Owner variant ----
+
+    /// @notice relinquishPrincipalAsOwner writes down the named client's principal (not the owner's).
+    function testRelinquishPrincipalAsOwnerWritesDownNamedClient() public {
+        _authorizeAndDeposit(user1, 1000e18);
+
+        uint256 sharesBefore = strategy.getTotalShares();
+
+        vm.prank(owner);
+        strategy.relinquishPrincipalAsOwner(user1, 400e18);
+
+        assertEq(strategy.principalOf(address(underlyingToken), user1), 600e18, "named client written down");
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), 600e18, "totalDeposited written down");
+        assertEq(strategy.getTotalShares(), sharesBefore, "shares untouched");
+    }
+
+    /// @notice relinquishPrincipalAsOwner reverts when caller is not the owner.
+    function testRelinquishPrincipalAsOwnerRevertsNotOwner() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        vm.prank(randomUser);
+        vm.expectRevert();
+        strategy.relinquishPrincipalAsOwner(user1, 400e18);
+    }
+
+    /// @notice relinquishPrincipalAsOwner caps over-requests and emits the event identically.
+    function testRelinquishPrincipalAsOwnerCapsAndEmits() public {
+        _authorizeAndDeposit(user1, 1000e18);
+
+        vm.expectEmit(true, true, false, true, address(strategy));
+        emit PrincipalRelinquished(address(underlyingToken), user1, 1000e18, 0);
+
+        vm.prank(owner);
+        strategy.relinquishPrincipalAsOwner(user1, 5000e18); // over-request
+
+        assertEq(strategy.principalOf(address(underlyingToken), user1), 0, "capped to available");
+        assertEq(strategy.getTotalDeposited(address(underlyingToken)), 0, "totalDeposited floored");
+    }
 }
