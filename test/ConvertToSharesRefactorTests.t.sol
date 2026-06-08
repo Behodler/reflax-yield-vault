@@ -579,7 +579,7 @@ contract ConvertToSharesRefactorTests is Test {
     function test_Group6_2_ZeroWithdrawalReverts() public {
         _deposit(1000e18);
 
-        vm.expectRevert("ERC4626YieldStrategy: amount must be greater than zero");
+        vm.expectRevert("AYieldStrategy: amount must be greater than zero");
         vm.prank(client);
         vault.withdraw(address(underlyingToken), 0, user);
     }
@@ -591,7 +591,7 @@ contract ConvertToSharesRefactorTests is Test {
     function test_Group6_3_ZeroAddressReverts() public {
         _deposit(1000e18);
 
-        vm.expectRevert("ERC4626YieldStrategy: recipient cannot be zero address");
+        vm.expectRevert("AYieldStrategy: recipient cannot be zero address");
         vm.prank(client);
         vault.withdraw(address(underlyingToken), 100e18, address(0));
     }

@@ -36,8 +36,8 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     ///      and must live in exactly one place. The base stays yield-source-agnostic: it never names a
     ///      vault type. Concrete strategies own the yield source and expose it to the accounting only
     ///      through two read hooks — `_positionValue()` (underlying value of the held position) and
-    ///      `getTotalShares()` (the position expressed as shares) — plus the `_depositInternal` /
-    ///      `_withdrawInternal` / `_skimSurplus` mutation hooks. However a different tech expresses
+    ///      `getTotalShares()` (the position expressed as shares) — plus the `_acquireShares` /
+    ///      `_disposeShares` / `_skimSurplus` mutation hooks. However a different tech expresses
     ///      yield, it reveals itself to this base purely in those terms.
     IERC20 public immutable underlyingToken;
 
@@ -124,6 +124,42 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
      * @param newPrincipal The client's remaining recorded principal after the write-down.
      */
     event PrincipalRelinquished(address indexed token, address indexed client, uint256 amount, uint256 newPrincipal);
+
+    /**
+     * @notice Emitted when underlying is deposited and backing shares are acquired.
+     * @param token The underlying token address.
+     * @param depositor The address that initiated the deposit (authorized client, or owner via depositAsOwner).
+     * @param recipient The address credited in accounting (clientBalances).
+     * @param amount The NOMINAL underlying amount sent in by the depositor (gross input).
+     *        NOTE: this is NOT necessarily the principal credited. Direct-vault strategies credit the full
+     *        nominal; the AMM market strategy credits a conservative slippage-haircut value, so the gap
+     *        between `amount` and the booked principal surfaces as protocol yield. Use `principalOf` for
+     *        the recorded principal.
+     * @param sharesReceived The backing shares acquired (vault.deposit or AMM swap output).
+     */
+    event Deposited(
+        address indexed token,
+        address indexed depositor,
+        address indexed recipient,
+        uint256 amount,
+        uint256 sharesReceived
+    );
+
+    /**
+     * @notice Emitted when backing shares are disposed and underlying is returned to a recipient.
+     * @param token The underlying token address.
+     * @param withdrawer The address that initiated the withdrawal (msg.sender of withdraw/withdrawAsOwner).
+     * @param recipient The recipient of the withdrawn underlying tokens.
+     * @param amount The principal amount withdrawn (the REQUESTED amount after capping to available principal).
+     * @param sharesDisposed The backing shares redeemed/sold to satisfy the withdrawal.
+     */
+    event Withdrawn(
+        address indexed token,
+        address indexed withdrawer,
+        address indexed recipient,
+        uint256 amount,
+        uint256 sharesDisposed
+    );
 
     /**
      * @notice Emitted when an emergency withdrawal is performed
@@ -617,6 +653,75 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
         emit PrincipalRelinquished(token, balanceHolder, amount, clientBalances[token][balanceHolder]);
     }
 
+    /**
+     * @notice Book a deposit: acquire backing shares via the concrete hook, then record principal.
+     * @param token The token address (must be underlying token)
+     * @param amount The nominal amount of underlying tokens deposited
+     * @param recipient The address credited in accounting (clientBalances)
+     * @param depositor The address tokens are transferred from
+     * @return creditedPrincipal The principal booked against `recipient`
+     * @dev Shared by deposit()/depositAsOwner(). Validation, the principal write, and the Deposited event
+     *      live HERE so deposit principal is booked in exactly one place; the concrete only moves shares
+     *      (`_acquireShares`) and reports how much principal that warrants.
+     */
+    function _depositInternal(address token, uint256 amount, address recipient, address depositor)
+        internal
+        returns (uint256 creditedPrincipal)
+    {
+        require(token == address(underlyingToken), "AYieldStrategy: only underlying token supported");
+        require(amount > 0, "AYieldStrategy: amount must be greater than zero");
+        require(recipient != address(0), "AYieldStrategy: recipient cannot be zero address");
+
+        // Concrete hook: pull underlying in and acquire shares. Returns the principal to book (full nominal
+        // for direct ERC4626, the slippage-haircut value for the AMM market strategy) and the shares
+        // received (used only for the event).
+        uint256 sharesReceived;
+        (creditedPrincipal, sharesReceived) = _acquireShares(amount, depositor);
+
+        // Principal accounting — the single place deposit principal is booked.
+        clientBalances[token][recipient] += creditedPrincipal;
+        totalDeposited[token] += creditedPrincipal;
+
+        // Event carries the NOMINAL `amount` (gross input), not the credited principal — see event doc.
+        emit Deposited(token, depositor, recipient, amount, sharesReceived);
+    }
+
+    /**
+     * @notice Book a withdrawal: dispose backing shares via the concrete hook, then write down principal.
+     * @param token The token address (must be underlying token)
+     * @param amount The amount of underlying tokens to withdraw (capped to available principal)
+     * @param recipient The address that receives the underlying tokens
+     * @param balanceHolder The address whose clientBalances are debited
+     * @dev Shared by withdraw()/withdrawAsOwner(); for standard withdraw() recipient == balanceHolder.
+     *      Validation, the cap, the principal write, and the Withdrawn event live HERE; the concrete only
+     *      moves shares (`_disposeShares`).
+     *
+     *      SECURITY — protocol-favouring write-down: principal is decremented by the REQUESTED (capped)
+     *      `amount`, NOT by what the redeem/swap actually returned. Any shortfall stays as protocol-owned
+     *      yield. This rule must remain in the base.
+     */
+    function _withdrawInternal(address token, uint256 amount, address recipient, address balanceHolder) internal {
+        require(token == address(underlyingToken), "AYieldStrategy: only underlying token supported");
+        require(amount > 0, "AYieldStrategy: amount must be greater than zero");
+        require(recipient != address(0), "AYieldStrategy: recipient cannot be zero address");
+
+        // Cap amount to available principal (prevents dust from blocking withdrawal). Must happen BEFORE
+        // the concrete computes shares, so the share disposal matches the booked write-down.
+        uint256 availablePrincipal = clientBalances[token][balanceHolder];
+        if (amount > availablePrincipal) {
+            amount = availablePrincipal;
+        }
+
+        // Concrete hook: dispose shares for the (capped) amount and deliver underlying to recipient.
+        uint256 sharesDisposed = _disposeShares(amount, recipient);
+
+        // Decrement by the REQUESTED (capped) amount, not what was received — shortfall accrues as yield.
+        clientBalances[token][balanceHolder] -= amount;
+        totalDeposited[token] -= amount;
+
+        emit Withdrawn(token, msg.sender, recipient, amount, sharesDisposed);
+    }
+
     // ============ YIELD-SOURCE HOOKS (abstract) ============
 
     /**
@@ -629,31 +734,31 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     function _positionValue() internal view virtual returns (uint256);
 
     /**
-     * @notice Acquire backing shares for a deposit and book the resulting principal.
-     * @param token The token address (must be underlying token)
+     * @notice Acquire backing shares for a deposit (pure share movement — NO accounting writes).
      * @param amount The nominal amount of underlying tokens deposited
-     * @param recipient The address credited in accounting (clientBalances)
-     * @param depositor The address tokens are transferred from
-     * @return creditedPrincipal The principal booked against `recipient`
-     * @dev Concrete strategies define HOW shares are acquired (direct vault.deposit vs AMM swap) and
-     *      how much principal is credited (full nominal vs slippage haircut), then update clientBalances
-     *      + totalDeposited accordingly.
+     * @param depositor The address the underlying tokens are pulled from
+     * @return creditedPrincipal The principal the base should book against the recipient (full nominal for
+     *         direct ERC4626; the slippage-haircut value for the AMM market strategy)
+     * @return sharesReceived The backing shares acquired (used only for the Deposited event)
+     * @dev The concrete defines HOW shares are acquired (vault.deposit vs AMM swap) and how much principal
+     *      that warrants. It MUST NOT touch clientBalances/totalDeposited — the base books principal in
+     *      `_depositInternal`. Keeps the base free of any vault/IERC4626 type dependency.
      */
-    function _depositInternal(address token, uint256 amount, address recipient, address depositor)
+    function _acquireShares(uint256 amount, address depositor)
         internal
         virtual
-        returns (uint256 creditedPrincipal);
+        returns (uint256 creditedPrincipal, uint256 sharesReceived);
 
     /**
-     * @notice Dispose backing shares for a withdrawal and decrement the holder's principal.
-     * @param token The token address (must be underlying token)
-     * @param amount The amount of underlying tokens to withdraw
-     * @param recipient The address that receives the underlying tokens
-     * @param balanceHolder The address whose clientBalances are debited
-     * @dev Concrete strategies define HOW shares are disposed (direct vault.redeem vs AMM swap).
-     *      For standard withdraw(), recipient == balanceHolder.
+     * @notice Dispose backing shares for a withdrawal (pure share movement — NO accounting writes).
+     * @param amount The amount of underlying to realise (already capped to available principal by the base)
+     * @param recipient The address that receives the disposed underlying tokens
+     * @return sharesDisposed The backing shares redeemed/sold (used only for the Withdrawn event)
+     * @dev The concrete defines HOW shares are disposed (vault.redeem vs AMM swap) and delivers the
+     *      resulting underlying to `recipient`. It MUST NOT touch clientBalances/totalDeposited — the base
+     *      writes down principal in `_withdrawInternal` (by the requested amount, protocol-favouring).
      */
-    function _withdrawInternal(address token, uint256 amount, address recipient, address balanceHolder) internal virtual;
+    function _disposeShares(uint256 amount, address recipient) internal virtual returns (uint256 sharesDisposed);
 
     // ============ INTERNAL HELPER FUNCTIONS ============
 

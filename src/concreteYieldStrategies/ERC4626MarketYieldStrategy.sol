@@ -42,38 +42,6 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
     // ============ EVENTS ============
 
     /**
-     * @notice Emitted when underlying tokens are swapped for vault tokens via AMM
-     * @param token The underlying token address
-     * @param depositor The address that initiated the deposit (client or owner)
-     * @param recipient The recipient of the deposited tokens (for accounting)
-     * @param amount The NOMINAL amount of underlying token sent in by the depositor.
-     *        NOTE: this is the gross input, NOT the principal credited. Principal is credited
-     *        conservatively as the slippage-haircut value (`_creditedPrincipal(amount)` =
-     *        amount * (MAX_BPS - slippageToleranceBps) / MAX_BPS); the gap between nominal and
-     *        credited surfaces as protocol yield. Use `principalOf` for the recorded principal.
-     * @param sharesReceived The amount of vault shares received from AMM swap
-     */
-    event Deposited(
-        address indexed token,
-        address indexed depositor,
-        address indexed recipient,
-        uint256 amount,
-        uint256 sharesReceived
-    );
-
-    /**
-     * @notice Emitted when vault tokens are swapped for underlying tokens via AMM
-     * @param token The underlying token address
-     * @param withdrawer The address that initiated the withdrawal
-     * @param recipient The recipient of the withdrawn tokens
-     * @param amount The principal amount withdrawn (requested)
-     * @param sharesSold The amount of vault shares sold via AMM
-     */
-    event Withdrawn(
-        address indexed token, address indexed withdrawer, address indexed recipient, uint256 amount, uint256 sharesSold
-    );
-
-    /**
      * @notice Emitted when slippage tolerance is updated
      * @param oldBps The previous slippage tolerance in basis points
      * @param newBps The new slippage tolerance in basis points
@@ -142,22 +110,21 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
     // ============ INTERNAL VAULT-INTERACTION HOOKS ============
 
     /**
-     * @notice Internal deposit logic shared between deposit() and depositAsOwner()
-     * @param token The token address (must be underlying token)
+     * @notice Acquire backing shares for a deposit via AMM swap — pure share movement, no accounting.
      * @param amount The amount of underlying tokens to deposit
-     * @param recipient The address credited in accounting (clientBalances)
      * @param depositor The address tokens are transferred from
-     * @return creditedPrincipal The conservative (haircut) principal booked against `recipient`
+     * @return creditedPrincipal The conservative (haircut) principal the base should book
+     * @return sharesReceived The vault shares received from the AMM swap (for the base's Deposited event)
+     * @dev Credits the worst-case fair value of the position acquired, NOT the nominal amount — tied to the
+     *      SAME slippage bound the swap's minOut enforces, so fair value of shares received >=
+     *      creditedPrincipal always; the gap surfaces as protocol yield. The base (`_depositInternal`)
+     *      validates inputs and writes clientBalances/totalDeposited with `creditedPrincipal`.
      */
-    function _depositInternal(address token, uint256 amount, address recipient, address depositor)
+    function _acquireShares(uint256 amount, address depositor)
         internal
         override
-        returns (uint256 creditedPrincipal)
+        returns (uint256 creditedPrincipal, uint256 sharesReceived)
     {
-        require(token == address(underlyingToken), "ERC4626MarketYieldStrategy: only underlying token supported");
-        require(amount > 0, "ERC4626MarketYieldStrategy: amount must be greater than zero");
-        require(recipient != address(0), "ERC4626MarketYieldStrategy: recipient cannot be zero address");
-
         // Transfer underlying token from depositor to this contract
         underlyingToken.safeTransferFrom(depositor, address(this), amount);
 
@@ -175,40 +142,20 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         underlyingToken.safeIncreaseAllowance(address(ammAdapter), amount);
 
         // Swap underlying -> vault tokens via AMM
-        uint256 sharesReceived = ammAdapter.swap(address(underlyingToken), address(vault), amount, minOut);
+        sharesReceived = ammAdapter.swap(address(underlyingToken), address(vault), amount, minOut);
         require(sharesReceived > 0, "ERC4626MarketYieldStrategy: no shares received");
-
-        // Update principal tracking with the conservative (haircut) credit, NOT the nominal amount.
-        clientBalances[token][recipient] += creditedPrincipal;
-        totalDeposited[token] += creditedPrincipal;
-
-        // Event emits the NOMINAL amount (gross input); credited principal is the haircut — see NatSpec.
-        emit Deposited(token, depositor, recipient, amount, sharesReceived);
     }
 
     /**
-     * @notice Internal withdraw logic shared between withdraw() and withdrawAsOwner()
-     * @param token The token address (must be underlying token)
-     * @param amount The amount of underlying tokens to withdraw
+     * @notice Dispose backing shares for a withdrawal via AMM swap — pure share movement, no accounting.
+     * @param amount The amount of underlying tokens to realise (already capped to available principal)
      * @param recipient The address that receives the underlying tokens
-     * @param balanceHolder The address whose clientBalances are debited
-     * @dev For standard withdraw(), recipient == balanceHolder.
-     *      For withdrawAsOwner(), the client's balance is debited but a different recipient receives tokens.
+     * @return sharesDisposed The vault shares sold via AMM (for the base's Withdrawn event)
+     * @dev Swaps shares for underlying and delivers it to `recipient`. The base (`_withdrawInternal`)
+     *      validates inputs, caps `amount` to available principal before calling this, and writes down the
+     *      principal by the requested amount (protocol-favouring).
      */
-    function _withdrawInternal(address token, uint256 amount, address recipient, address balanceHolder)
-        internal
-        override
-    {
-        require(token == address(underlyingToken), "ERC4626MarketYieldStrategy: only underlying token supported");
-        require(amount > 0, "ERC4626MarketYieldStrategy: amount must be greater than zero");
-        require(recipient != address(0), "ERC4626MarketYieldStrategy: recipient cannot be zero address");
-
-        // Cap amount to available principal (prevents dust from blocking withdrawal)
-        uint256 availablePrincipal = clientBalances[token][balanceHolder];
-        if (amount > availablePrincipal) {
-            amount = availablePrincipal;
-        }
-
+    function _disposeShares(uint256 amount, address recipient) internal override returns (uint256 sharesDisposed) {
         // Convert requested amount to shares, cap to actual balance
         uint256 sharesToSell = vault.convertToShares(amount);
         uint256 availableShares = vault.balanceOf(address(this));
@@ -229,12 +176,7 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
         // Transfer underlying to recipient
         underlyingToken.safeTransfer(recipient, underlyingReceived);
 
-        // SECURITY: Decrement principal by REQUESTED amount, not RECEIVED amount
-        // Any difference accumulates as protocol-owned yield
-        clientBalances[token][balanceHolder] -= amount;
-        totalDeposited[token] -= amount;
-
-        emit Withdrawn(token, msg.sender, recipient, amount, sharesToSell);
+        sharesDisposed = sharesToSell;
     }
 
     // ============ INTERNAL VIRTUAL FUNCTION IMPLEMENTATIONS ============

@@ -32,40 +32,6 @@ contract ERC4626YieldStrategy is AYieldStrategy {
     /// @notice The external ERC4626 vault this strategy deposits into
     IERC4626 public immutable vault;
 
-    // ============ EVENTS ============
-
-    /**
-     * @notice Emitted when underlying token is deposited into the ERC4626 vault
-     * @param token The token address
-     * @param depositor The address that initiated the deposit (client or owner)
-     * @param recipient The recipient of the deposited tokens (for accounting)
-     * @param amount The amount of underlying token deposited
-     * @param sharesReceived The amount of vault shares received
-     */
-    event Deposited(
-        address indexed token,
-        address indexed depositor,
-        address indexed recipient,
-        uint256 amount,
-        uint256 sharesReceived
-    );
-
-    /**
-     * @notice Emitted when vault shares are redeemed for underlying token
-     * @param token The token address
-     * @param withdrawer The address that initiated the withdrawal
-     * @param recipient The recipient of the withdrawn tokens
-     * @param amount The principal amount withdrawn (requested)
-     * @param sharesBurned The amount of vault shares burned
-     */
-    event Withdrawn(
-        address indexed token,
-        address indexed withdrawer,
-        address indexed recipient,
-        uint256 amount,
-        uint256 sharesBurned
-    );
-
     // ============ CONSTRUCTOR ============
 
     /**
@@ -99,62 +65,39 @@ contract ERC4626YieldStrategy is AYieldStrategy {
     // ============ INTERNAL VAULT-INTERACTION HOOKS ============
 
     /**
-     * @notice Internal deposit logic shared between deposit() and depositAsOwner()
-     * @param token The token address (must be underlying token)
+     * @notice Acquire backing shares for a deposit — pure share movement, no accounting.
      * @param amount The amount of underlying tokens to deposit
-     * @param recipient The address credited in accounting (clientBalances)
      * @param depositor The address tokens are transferred from
-     * @return creditedPrincipal The principal booked against `recipient` — the full nominal `amount`
+     * @return creditedPrincipal The principal the base should book — the full nominal `amount`
+     * @return sharesReceived The vault shares received (for the base's Deposited event)
+     * @dev Direct ERC4626 deposit: credits the full nominal amount (no haircut). The base
+     *      (`_depositInternal`) validates inputs and writes clientBalances/totalDeposited.
      */
-    function _depositInternal(address token, uint256 amount, address recipient, address depositor)
+    function _acquireShares(uint256 amount, address depositor)
         internal
         override
-        returns (uint256 creditedPrincipal)
+        returns (uint256 creditedPrincipal, uint256 sharesReceived)
     {
-        require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
-        require(amount > 0, "ERC4626YieldStrategy: amount must be greater than zero");
-        require(recipient != address(0), "ERC4626YieldStrategy: recipient cannot be zero address");
-
         // Transfer underlying token from depositor to this contract
         underlyingToken.safeTransferFrom(depositor, address(this), amount);
 
         // Deposit into ERC4626 vault — shares come directly to this contract
-        uint256 sharesReceived = vault.deposit(amount, address(this));
+        sharesReceived = vault.deposit(amount, address(this));
         require(sharesReceived > 0, "ERC4626YieldStrategy: no shares received");
-
-        // Update principal tracking
-        clientBalances[token][recipient] += amount;
-        totalDeposited[token] += amount;
-
-        emit Deposited(token, depositor, recipient, amount, sharesReceived);
 
         // Full-credit default: the booked principal equals the nominal amount.
         creditedPrincipal = amount;
     }
 
     /**
-     * @notice Internal withdraw logic shared between withdraw() and withdrawAsOwner()
-     * @param token The token address (must be underlying token)
-     * @param amount The amount of underlying tokens to withdraw
+     * @notice Dispose backing shares for a withdrawal — pure share movement, no accounting.
+     * @param amount The amount of underlying tokens to realise (already capped to available principal)
      * @param recipient The address that receives the underlying tokens
-     * @param balanceHolder The address whose clientBalances are debited
-     * @dev For standard withdraw(), recipient == balanceHolder.
-     *      For withdrawAsOwner(), the client's balance is debited but a different recipient receives tokens.
+     * @return sharesDisposed The vault shares burned (for the base's Withdrawn event)
+     * @dev Redeems shares straight to `recipient`. The base (`_withdrawInternal`) validates inputs, caps
+     *      `amount` to available principal before calling this, and writes down the principal.
      */
-    function _withdrawInternal(address token, uint256 amount, address recipient, address balanceHolder)
-        internal
-        override
-    {
-        require(token == address(underlyingToken), "ERC4626YieldStrategy: only underlying token supported");
-        require(amount > 0, "ERC4626YieldStrategy: amount must be greater than zero");
-        require(recipient != address(0), "ERC4626YieldStrategy: recipient cannot be zero address");
-
-        // Cap amount to available principal (prevents dust from blocking withdrawal)
-        uint256 availablePrincipal = clientBalances[token][balanceHolder];
-        if (amount > availablePrincipal) {
-            amount = availablePrincipal;
-        }
-
+    function _disposeShares(uint256 amount, address recipient) internal override returns (uint256 sharesDisposed) {
         // Convert requested amount to shares, cap to actual balance
         uint256 sharesToRedeem = vault.convertToShares(amount);
         uint256 availableShares = vault.balanceOf(address(this));
@@ -165,12 +108,7 @@ contract ERC4626YieldStrategy is AYieldStrategy {
         // Redeem shares for underlying tokens — sent directly to recipient
         vault.redeem(sharesToRedeem, recipient, address(this));
 
-        // SECURITY: Decrement principal by REQUESTED amount, not RECEIVED amount
-        // Any difference accumulates as protocol-owned yield
-        clientBalances[token][balanceHolder] -= amount;
-        totalDeposited[token] -= amount;
-
-        emit Withdrawn(token, msg.sender, recipient, amount, sharesToRedeem);
+        sharesDisposed = sharesToRedeem;
     }
 
     // ============ INTERNAL VIRTUAL FUNCTION IMPLEMENTATIONS ============

@@ -427,7 +427,7 @@ contract ERC4626YieldStrategyTest is Test {
     function testDepositRevertsForWrongToken() public {
         MockERC20 wrongToken = new MockERC20("Wrong", "WRONG", 18);
 
-        vm.expectRevert("ERC4626YieldStrategy: only underlying token supported");
+        vm.expectRevert("AYieldStrategy: only underlying token supported");
         vm.prank(client);
         strategy.deposit(address(wrongToken), 1000e18, user1);
     }
@@ -507,14 +507,14 @@ contract ERC4626YieldStrategyTest is Test {
 
     /// @notice Test zero-amount deposit reverts
     function testZeroDepositReverts() public {
-        vm.expectRevert("ERC4626YieldStrategy: amount must be greater than zero");
+        vm.expectRevert("AYieldStrategy: amount must be greater than zero");
         vm.prank(client);
         strategy.deposit(address(underlyingToken), 0, user1);
     }
 
     /// @notice Test zero-amount withdraw reverts
     function testZeroWithdrawReverts() public {
-        vm.expectRevert("ERC4626YieldStrategy: amount must be greater than zero");
+        vm.expectRevert("AYieldStrategy: amount must be greater than zero");
         vm.prank(client);
         strategy.withdraw(address(underlyingToken), 0, user1);
     }

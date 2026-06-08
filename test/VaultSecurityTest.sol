@@ -290,11 +290,11 @@ contract VaultSecurityTest is Test {
         vm.startPrank(bondingCurve);
 
         // Zero amount should revert
-        vm.expectRevert("ERC4626YieldStrategy: amount must be greater than zero");
+        vm.expectRevert("AYieldStrategy: amount must be greater than zero");
         vault.deposit(address(token), 0, user1);
 
         // Zero recipient address should revert
-        vm.expectRevert("ERC4626YieldStrategy: recipient cannot be zero address");
+        vm.expectRevert("AYieldStrategy: recipient cannot be zero address");
         vault.deposit(address(token), amount, address(0));
 
         vm.stopPrank();
@@ -310,11 +310,11 @@ contract VaultSecurityTest is Test {
         vm.startPrank(bondingCurve);
 
         // Zero amount should revert
-        vm.expectRevert("ERC4626YieldStrategy: amount must be greater than zero");
+        vm.expectRevert("AYieldStrategy: amount must be greater than zero");
         vault.withdraw(address(token), 0, user1);
 
         // Zero recipient address should revert
-        vm.expectRevert("ERC4626YieldStrategy: recipient cannot be zero address");
+        vm.expectRevert("AYieldStrategy: recipient cannot be zero address");
         vault.withdraw(address(token), 500 * 1e18, address(0));
 
         vm.stopPrank();
