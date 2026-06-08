@@ -4,6 +4,7 @@ pragma solidity ^0.8.13;
 import "../AYieldStrategy.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 /**
  * @title ERC4626YieldStrategy
@@ -25,6 +26,11 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  */
 contract ERC4626YieldStrategy is AYieldStrategy {
     using SafeERC20 for IERC20;
+
+    // ============ STATE VARIABLES ============
+
+    /// @notice The external ERC4626 vault this strategy deposits into
+    IERC4626 public immutable vault;
 
     // ============ EVENTS ============
 
@@ -69,10 +75,25 @@ contract ERC4626YieldStrategy is AYieldStrategy {
      * @param _erc4626Vault The ERC4626 vault address
      */
     constructor(address _owner, address _underlyingToken, address _erc4626Vault)
-        AYieldStrategy(_owner, _underlyingToken, _erc4626Vault)
+        AYieldStrategy(_owner, _underlyingToken)
     {
+        require(_erc4626Vault != address(0), "ERC4626YieldStrategy: vault cannot be zero address");
+        vault = IERC4626(_erc4626Vault);
+
         // Approve vault to spend unlimited underlying tokens
         IERC20(_underlyingToken).approve(_erc4626Vault, type(uint256).max);
+    }
+
+    // ============ YIELD-SOURCE READ HOOKS ============
+
+    /// @inheritdoc AYieldStrategy
+    function getTotalShares() external view override returns (uint256) {
+        return vault.balanceOf(address(this));
+    }
+
+    /// @inheritdoc AYieldStrategy
+    function _positionValue() internal view override returns (uint256) {
+        return vault.convertToAssets(vault.balanceOf(address(this)));
     }
 
     // ============ INTERNAL VAULT-INTERACTION HOOKS ============

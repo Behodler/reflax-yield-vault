@@ -916,7 +916,7 @@ contract ERC4626MarketYieldStrategyTest is Test {
     }
 
     function testConstructorRevertsZeroVault() public {
-        vm.expectRevert("AYieldStrategy: vault cannot be zero address");
+        vm.expectRevert("ERC4626MarketYieldStrategy: vault cannot be zero address");
         vm.prank(owner);
         new ERC4626MarketYieldStrategy(owner, address(underlyingToken), address(0), address(ammAdapter));
     }

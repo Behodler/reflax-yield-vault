@@ -5,6 +5,7 @@ import "../AYieldStrategy.sol";
 import "../AMMAdapters/IAMMAdapter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 /**
  * @title ERC4626MarketYieldStrategy
@@ -25,6 +26,9 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
     using SafeERC20 for IERC20;
 
     // ============ STATE VARIABLES ============
+
+    /// @notice The external ERC4626 vault whose shares are traded via AMM
+    IERC4626 public immutable vault;
 
     /// @notice The AMM adapter used for swapping between underlying and vault tokens
     IAMMAdapter public immutable ammAdapter;
@@ -86,10 +90,24 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
      * @param _ammAdapter The AMM adapter address for swapping tokens
      */
     constructor(address _owner, address _underlyingToken, address _erc4626Vault, address _ammAdapter)
-        AYieldStrategy(_owner, _underlyingToken, _erc4626Vault)
+        AYieldStrategy(_owner, _underlyingToken)
     {
+        require(_erc4626Vault != address(0), "ERC4626MarketYieldStrategy: vault cannot be zero address");
         require(_ammAdapter != address(0), "ERC4626MarketYieldStrategy: AMM adapter cannot be zero address");
+        vault = IERC4626(_erc4626Vault);
         ammAdapter = IAMMAdapter(_ammAdapter);
+    }
+
+    // ============ YIELD-SOURCE READ HOOKS ============
+
+    /// @inheritdoc AYieldStrategy
+    function getTotalShares() external view override returns (uint256) {
+        return vault.balanceOf(address(this));
+    }
+
+    /// @inheritdoc AYieldStrategy
+    function _positionValue() internal view override returns (uint256) {
+        return vault.convertToAssets(vault.balanceOf(address(this)));
     }
 
     // ============ OWNER CONFIGURATION ============

@@ -5,7 +5,6 @@ import "./interfaces/IYieldStrategy.sol";
 import "pauser/interfaces/IPausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
@@ -33,14 +32,14 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     mapping(address => bool) public authorizedWithdrawers;
 
     /// @notice The underlying token this strategy accepts (e.g., BOLD, USDS, USDC)
-    /// @dev Hoisted here (with `vault`) because the principal accounting below is fundamental to every
-    ///      ERC4626-backed yield strategy and must live in exactly one place. Concrete strategies differ
-    ///      only in HOW shares are acquired/disposed (direct redeem vs AMM swap) — the `_depositInternal`
-    ///      / `_withdrawInternal` / `_skimSurplus` hooks — not in the accounting.
+    /// @dev Hoisted here because the principal accounting below is fundamental to every yield strategy
+    ///      and must live in exactly one place. The base stays yield-source-agnostic: it never names a
+    ///      vault type. Concrete strategies own the yield source and expose it to the accounting only
+    ///      through two read hooks — `_positionValue()` (underlying value of the held position) and
+    ///      `getTotalShares()` (the position expressed as shares) — plus the `_depositInternal` /
+    ///      `_withdrawInternal` / `_skimSurplus` mutation hooks. However a different tech expresses
+    ///      yield, it reveals itself to this base purely in those terms.
     IERC20 public immutable underlyingToken;
-
-    /// @notice The external ERC4626 vault whose shares back client principal
-    IERC4626 public immutable vault;
 
     /// @notice Tracks each client's deposited (recorded) principal per token
     mapping(address => mapping(address => uint256)) internal clientBalances;
@@ -193,18 +192,17 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     // ============ CONSTRUCTOR ============
 
     /**
-     * @notice Initialize the strategy with its owner, underlying token, and backing ERC4626 vault
+     * @notice Initialize the strategy with its owner and underlying token
      * @param _owner The initial owner of the contract
      * @param _underlyingToken The underlying token this strategy accepts
-     * @param _erc4626Vault The ERC4626 vault whose shares back client principal
+     * @dev The yield source (vault/AMM position) is owned and configured by the concrete strategy, which
+     *      exposes it to this base only through the _positionValue() / getTotalShares() read hooks.
      */
-    constructor(address _owner, address _underlyingToken, address _erc4626Vault) Ownable(_owner) {
+    constructor(address _owner, address _underlyingToken) Ownable(_owner) {
         require(_owner != address(0), "AYieldStrategy: owner cannot be zero address");
         require(_underlyingToken != address(0), "AYieldStrategy: underlying token cannot be zero address");
-        require(_erc4626Vault != address(0), "AYieldStrategy: vault cannot be zero address");
 
         underlyingToken = IERC20(_underlyingToken);
-        vault = IERC4626(_erc4626Vault);
     }
 
     // ============ OWNER FUNCTIONS ============
@@ -478,9 +476,9 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
             return 0;
         }
 
-        // Calculate proportional share of total vault value
-        uint256 totalShares = vault.balanceOf(address(this));
-        uint256 totalValue = vault.convertToAssets(totalShares);
+        // Total value of the held position, in underlying terms — supplied by the concrete strategy's
+        // yield source (vault, AMM-held shares, or whatever the tech is) via the _positionValue() hook.
+        uint256 totalValue = _positionValue();
 
         // User's proportion: (userPrincipal / totalPrincipal) * totalValue
         return (totalValue * principal) / totalDeposited[token];
@@ -508,12 +506,12 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     }
 
     /**
-     * @notice Get the total vault shares held directly by this strategy
-     * @return The total amount of vault shares
+     * @notice Get the total shares held directly by this strategy
+     * @return The total amount of shares held against client principal
+     * @dev Hook: the concrete strategy expresses its yield position as a share count. No matter how a
+     *      yield source represents itself, it reveals itself to the base in terms of shares.
      */
-    function getTotalShares() external view returns (uint256) {
-        return vault.balanceOf(address(this));
-    }
+    function getTotalShares() external view virtual returns (uint256);
 
     // ============ PRINCIPAL ACCOUNTING — MUTATING ENTRY POINTS ============
 
@@ -619,7 +617,16 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
         emit PrincipalRelinquished(token, balanceHolder, amount, clientBalances[token][balanceHolder]);
     }
 
-    // ============ VAULT-INTERACTION HOOKS (abstract) ============
+    // ============ YIELD-SOURCE HOOKS (abstract) ============
+
+    /**
+     * @notice The underlying-denominated value of the entire position this strategy holds.
+     * @return The total value, in underlying-token terms, of the strategy's held shares.
+     * @dev The base's only window into the yield source's valuation. Concrete strategies compute this
+     *      from their own source (e.g. vault.convertToAssets(vault.balanceOf(this))). Keeps the base
+     *      free of any vault/IERC4626 type dependency.
+     */
+    function _positionValue() internal view virtual returns (uint256);
 
     /**
      * @notice Acquire backing shares for a deposit and book the resulting principal.
