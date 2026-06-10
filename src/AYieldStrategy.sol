@@ -56,6 +56,12 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     ///      mapping(token => mapping(client => uint256)).
     mapping(address => uint256) public setAsideBufferSize;
 
+    /// @notice The single address that receives the aggregated set-aside buffer from ALL clients on each
+    ///         skimSurplus call. When any client has a nonzero buffer configured, this MUST be set;
+    ///         skimSurplus reverts loudly if totalBufferShares > 0 and this is address(0).
+    ///         Default is address(0) (unset). Use setSetAsideBufferRecipient to configure.
+    address public setAsideBufferRecipient;
+
     /// @notice Withdrawal status enumeration
     enum WithdrawalStatus {
         None, // No withdrawal initiated
@@ -102,6 +108,13 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
      * @param newPercent The new buffer percentage (0–100)
      */
     event SetAsideBufferSet(address indexed client, uint256 oldPercent, uint256 newPercent);
+
+    /**
+     * @notice Emitted when the global set-aside buffer recipient is updated
+     * @param oldRecipient The previous recipient address
+     * @param newRecipient The new recipient address
+     */
+    event SetAsideBufferRecipientSet(address indexed oldRecipient, address indexed newRecipient);
 
     /**
      * @notice Emitted when an authorized withdrawer skims surplus from a client balance
@@ -325,6 +338,22 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
         uint256 old = setAsideBufferSize[client];
         setAsideBufferSize[client] = bufferPercent;
         emit SetAsideBufferSet(client, old, bufferPercent);
+    }
+
+    /**
+     * @notice Set the global recipient for aggregated set-aside buffers.
+     * @param _recipient The address that will receive all set-aside buffer tokens on each skim.
+     *        Must be non-zero; use this to direct buffer yield to a specific protocol address
+     *        (e.g., stable-staker).
+     * @dev Owner-gated. Once any client has a nonzero buffer configured, this MUST be set before
+     *      skimSurplus is called or the skim will revert loudly. Zero-address is rejected here to
+     *      prevent accidentally locking buffer tokens.
+     */
+    function setSetAsideBufferRecipient(address _recipient) external onlyOwner {
+        require(_recipient != address(0), "AYieldStrategy: recipient cannot be zero address");
+        address old = setAsideBufferRecipient;
+        setAsideBufferRecipient = _recipient;
+        emit SetAsideBufferRecipientSet(old, _recipient);
     }
 
     /**

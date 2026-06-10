@@ -26,6 +26,7 @@ contract ERC4626YieldStrategyTest is Test {
     address user3 = address(0x2468);
     address withdrawer = address(0xABCD);
     address randomUser = address(0xBEEF);
+    address bufferRecipient = address(0xCAFE);
 
     uint256 constant INITIAL_TOKEN_SUPPLY = 10_000_000e18;
 
@@ -1015,22 +1016,25 @@ contract ERC4626YieldStrategyTest is Test {
         assertEq(underlyingToken.balanceOf(user1), client1Before, "no set-aside at buffer 0");
     }
 
-    /// @notice Buffer N% for one client: that client receives ~N% of its proportional proceeds,
-    ///         recipient gets the rest, return value == recipient amount; exactly one redeem.
+    /// @notice Buffer N% for one client: bufferRecipient receives ~N% of that client's proportional
+    ///         proceeds as an aggregate transfer, the skim recipient gets the rest. Exactly one redeem.
     function testSkimSurplusBufferSingleClient() public {
         _authorizeAndDeposit(user1, 1000e18);
         _authorizeAndDeposit(user2, 3000e18);
         erc4626Vault.simulateYield(800e18); // 4000 -> 4800, 800 surplus
 
         // user1 buffer = 40%
-        vm.prank(owner);
+        vm.startPrank(owner);
         strategy.setSetAsideBuffer(user1, 40);
+        strategy.setSetAsideBufferRecipient(bufferRecipient);
+        vm.stopPrank();
 
         // Compute user1's snapshot surplus and expected set-aside ~ 40% of user1's proportional proceeds
         uint256 surplus1 = strategy.totalBalanceOf(address(underlyingToken), user1)
             - strategy.principalOf(address(underlyingToken), user1);
 
         uint256 recipientBefore = underlyingToken.balanceOf(withdrawer);
+        uint256 bufferRecipientBefore = underlyingToken.balanceOf(bufferRecipient);
         uint256 client1Before = underlyingToken.balanceOf(user1);
         uint256 redeemsBefore = erc4626Vault.redeemCount();
 
@@ -1040,23 +1044,25 @@ contract ERC4626YieldStrategyTest is Test {
         // Exactly one redeem in the buffered path
         assertEq(erc4626Vault.redeemCount() - redeemsBefore, 1, "buffered path: exactly one redeem");
 
-        uint256 client1Got = underlyingToken.balanceOf(user1) - client1Before;
+        uint256 bufferGot = underlyingToken.balanceOf(bufferRecipient) - bufferRecipientBefore;
         uint256 recipientGot = underlyingToken.balanceOf(withdrawer) - recipientBefore;
 
-        // user1 received ~40% of its surplus (1:1 vault, small rounding dust)
-        assertApproxEqAbs(client1Got, surplus1 * 40 / 100, 5, "user1 set-aside ~ 40% of its surplus");
-        assertGt(client1Got, 0);
-        // return value equals what recipient actually received
+        // bufferRecipient received ~40% of user1's surplus (1:1 vault, small rounding dust)
+        assertApproxEqAbs(bufferGot, surplus1 * 40 / 100, 5, "bufferRecipient set-aside ~ 40% of user1's surplus");
+        assertGt(bufferGot, 0);
+        // user1 itself receives nothing (buffer goes to recipient, not back to client)
+        assertEq(underlyingToken.balanceOf(user1), client1Before, "client receives nothing back");
+        // return value equals what skim recipient actually received
         assertEq(returned, recipientGot, "return == recipient delivered");
-        // recipient + client set-aside ~= total proceeds
-        assertApproxEqAbs(recipientGot + client1Got, surplus1 + (surplus1 * 3), 6, "split sums to total proceeds");
+        // recipient + buffer set-aside ~= total proceeds
+        assertApproxEqAbs(recipientGot + bufferGot, surplus1 + (surplus1 * 3), 6, "split sums to total proceeds");
 
         // Principal untouched
         assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
         assertEq(strategy.principalOf(address(underlyingToken), user2), 3000e18);
     }
 
-    /// @notice Multiple clients with different buffers each get their own proportional set-aside
+    /// @notice Multiple clients with different buffers: aggregate goes to bufferRecipient, clients get nothing
     function testSkimSurplusBufferMultipleClients() public {
         _authorizeAndDeposit(user1, 1000e18);
         _authorizeAndDeposit(user2, 1000e18);
@@ -1067,6 +1073,7 @@ contract ERC4626YieldStrategyTest is Test {
         strategy.setSetAsideBuffer(user1, 50);
         strategy.setSetAsideBuffer(user2, 25);
         // user3 left at 0
+        strategy.setSetAsideBufferRecipient(bufferRecipient);
         vm.stopPrank();
 
         uint256 s1 = strategy.totalBalanceOf(address(underlyingToken), user1)
@@ -1077,23 +1084,33 @@ contract ERC4626YieldStrategyTest is Test {
         uint256 c1Before = underlyingToken.balanceOf(user1);
         uint256 c2Before = underlyingToken.balanceOf(user2);
         uint256 c3Before = underlyingToken.balanceOf(user3);
+        uint256 bufferRecipientBefore = underlyingToken.balanceOf(bufferRecipient);
 
         vm.prank(withdrawer);
         strategy.skimSurplus(address(underlyingToken), withdrawer);
 
-        assertApproxEqAbs(underlyingToken.balanceOf(user1) - c1Before, s1 * 50 / 100, 5, "user1 50%");
-        assertApproxEqAbs(underlyingToken.balanceOf(user2) - c2Before, s2 * 25 / 100, 5, "user2 25%");
+        // Clients receive nothing back (buffer goes to global recipient)
+        assertEq(underlyingToken.balanceOf(user1) - c1Before, 0, "user1 receives nothing back");
+        assertEq(underlyingToken.balanceOf(user2) - c2Before, 0, "user2 receives nothing back");
         assertEq(underlyingToken.balanceOf(user3) - c3Before, 0, "user3 buffer 0 -> nothing");
+
+        // bufferRecipient receives the aggregate of user1 (50%) + user2 (25%) set-asides
+        uint256 bufferGot = underlyingToken.balanceOf(bufferRecipient) - bufferRecipientBefore;
+        uint256 expectedAggregate = s1 * 50 / 100 + s2 * 25 / 100;
+        assertApproxEqAbs(bufferGot, expectedAggregate, 10, "bufferRecipient gets aggregate of user1+user2 set-asides");
+        assertGt(bufferGot, 0, "some buffer was transferred");
     }
 
-    /// @notice Buffer 100% => that client's whole portion goes to it
+    /// @notice Buffer 100% => that client's whole portion goes to bufferRecipient, not back to client
     function testSkimSurplusBuffer100Percent() public {
         _authorizeAndDeposit(user1, 1000e18);
         _authorizeAndDeposit(user2, 1000e18);
         erc4626Vault.simulateYield(400e18); // 2000 -> 2400, 200 surplus each
 
-        vm.prank(owner);
+        vm.startPrank(owner);
         strategy.setSetAsideBuffer(user1, 100);
+        strategy.setSetAsideBufferRecipient(bufferRecipient);
+        vm.stopPrank();
 
         // Snapshot both surpluses BEFORE the skim (they are consumed by it)
         uint256 s1 = strategy.totalBalanceOf(address(underlyingToken), user1)
@@ -1103,16 +1120,20 @@ contract ERC4626YieldStrategyTest is Test {
 
         uint256 c1Before = underlyingToken.balanceOf(user1);
         uint256 recipientBefore = underlyingToken.balanceOf(withdrawer);
+        uint256 bufferRecipientBefore = underlyingToken.balanceOf(bufferRecipient);
 
         vm.prank(withdrawer);
         uint256 returned = strategy.skimSurplus(address(underlyingToken), withdrawer);
 
-        // user1 gets ~its full surplus; recipient gets only user2's surplus
-        assertApproxEqAbs(underlyingToken.balanceOf(user1) - c1Before, s1, 5, "user1 100% of its surplus");
+        // user1 gets nothing back (buffer goes to bufferRecipient)
+        assertEq(underlyingToken.balanceOf(user1) - c1Before, 0, "client receives nothing back");
+        // bufferRecipient gets ~user1's full surplus
+        uint256 bufferGot = underlyingToken.balanceOf(bufferRecipient) - bufferRecipientBefore;
+        assertApproxEqAbs(bufferGot, s1, 5, "bufferRecipient gets 100% of user1's surplus");
         uint256 recipientGot = underlyingToken.balanceOf(withdrawer) - recipientBefore;
         assertEq(returned, recipientGot, "return == recipient delivered");
-        // recipient receives ~ user2's surplus only
-        assertApproxEqAbs(recipientGot, s2, 6, "recipient gets only the non-buffered client surplus");
+        // skim recipient receives ~ user2's surplus only
+        assertApproxEqAbs(recipientGot, s2, 6, "skim recipient gets only the non-buffered client surplus");
     }
 
     /// @notice Front-running: a large fresh deposit before a skim shifts buffer attribution toward
@@ -1121,9 +1142,11 @@ contract ERC4626YieldStrategyTest is Test {
         _authorizeAndDeposit(user1, 1000e18);
         _authorizeAndDeposit(user2, 1000e18);
 
-        // user1 has a 100% buffer
-        vm.prank(owner);
+        // user1 has a 100% buffer; set the global recipient
+        vm.startPrank(owner);
         strategy.setSetAsideBuffer(user1, 100);
+        strategy.setSetAsideBufferRecipient(bufferRecipient);
+        vm.stopPrank();
 
         // yield accrues
         erc4626Vault.simulateYield(400e18);
@@ -1144,6 +1167,113 @@ contract ERC4626YieldStrategyTest is Test {
 
         // The fresh deposit increased user1's attributed surplus (and thus its 100% set-aside)
         assertGt(s1After, s1Before, "front-run raises depositing client's attributed surplus");
+    }
+
+    // ============ setAsideBufferRecipient TESTS (story 047) ============
+
+    event SetAsideBufferRecipientSet(address indexed oldRecipient, address indexed newRecipient);
+
+    /// @notice Default bufferRecipient is address(0) (unset)
+    function testSetAsideBufferRecipientDefaultsZero() public view {
+        assertEq(strategy.setAsideBufferRecipient(), address(0));
+    }
+
+    /// @notice Owner can set the bufferRecipient; event emitted with old/new
+    function testSetSetAsideBufferRecipientOwnerAndEvent() public {
+        vm.expectEmit(true, true, false, false);
+        emit SetAsideBufferRecipientSet(address(0), bufferRecipient);
+        vm.prank(owner);
+        strategy.setSetAsideBufferRecipient(bufferRecipient);
+        assertEq(strategy.setAsideBufferRecipient(), bufferRecipient);
+    }
+
+    /// @notice Non-owner cannot set the bufferRecipient
+    function testSetSetAsideBufferRecipientRevertsForNonOwner() public {
+        vm.expectRevert(abi.encodeWithSignature("OwnableUnauthorizedAccount(address)", randomUser));
+        vm.prank(randomUser);
+        strategy.setSetAsideBufferRecipient(bufferRecipient);
+    }
+
+    /// @notice Zero address reverts
+    function testSetSetAsideBufferRecipientRevertsZeroAddress() public {
+        vm.expectRevert("AYieldStrategy: recipient cannot be zero address");
+        vm.prank(owner);
+        strategy.setSetAsideBufferRecipient(address(0));
+    }
+
+    /// @notice Skim with nonzero buffer % but unset recipient reverts loudly
+    function testSkimSurplusBufferSetButRecipientUnsetReverts() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        _authorizeAndDeposit(user2, 1000e18);
+        erc4626Vault.simulateYield(200e18);
+
+        // Set a buffer but do NOT set the recipient
+        vm.prank(owner);
+        strategy.setSetAsideBuffer(user1, 20);
+
+        vm.expectRevert("AYieldStrategy: setAsideBufferRecipient not set");
+        vm.prank(withdrawer);
+        strategy.skimSurplus(address(underlyingToken), withdrawer);
+    }
+
+    /// @notice Skim with all buffer sizes 0 and unset recipient succeeds (back-compat)
+    function testSkimSurplusAllBuffersZeroUnsetRecipientSucceeds() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        _authorizeAndDeposit(user2, 1000e18);
+        erc4626Vault.simulateYield(200e18);
+
+        // No buffer set, no recipient set — should succeed as before
+        uint256 recipientBefore = underlyingToken.balanceOf(withdrawer);
+
+        vm.prank(withdrawer);
+        uint256 returned = strategy.skimSurplus(address(underlyingToken), withdrawer);
+
+        assertGt(returned, 0, "skim succeeded with no buffers configured");
+        assertEq(underlyingToken.balanceOf(withdrawer) - recipientBefore, returned, "recipient got full proceeds");
+    }
+
+    /// @notice Multi-client skim: two clients with positive surplus and nonzero buffer;
+    ///         bufferRecipient receives the SUM of both buffers, claimer gets the remainder.
+    function testSkimSurplusMultiClientBothBuffered() public {
+        _authorizeAndDeposit(user1, 1000e18);
+        _authorizeAndDeposit(user2, 2000e18);
+        erc4626Vault.simulateYield(600e18); // 3000 -> 3600, surplus proportional
+
+        vm.startPrank(owner);
+        strategy.setSetAsideBuffer(user1, 10);
+        strategy.setSetAsideBuffer(user2, 10);
+        strategy.setSetAsideBufferRecipient(bufferRecipient);
+        vm.stopPrank();
+
+        uint256 s1 = strategy.totalBalanceOf(address(underlyingToken), user1)
+            - strategy.principalOf(address(underlyingToken), user1);
+        uint256 s2 = strategy.totalBalanceOf(address(underlyingToken), user2)
+            - strategy.principalOf(address(underlyingToken), user2);
+
+        uint256 expectedBuffer1 = s1 * 10 / 100;
+        uint256 expectedBuffer2 = s2 * 10 / 100;
+        uint256 expectedTotalBuffer = expectedBuffer1 + expectedBuffer2;
+
+        uint256 recipientBefore = underlyingToken.balanceOf(withdrawer);
+        uint256 bufferRecipientBefore = underlyingToken.balanceOf(bufferRecipient);
+
+        vm.prank(withdrawer);
+        uint256 returned = strategy.skimSurplus(address(underlyingToken), withdrawer);
+
+        uint256 bufferGot = underlyingToken.balanceOf(bufferRecipient) - bufferRecipientBefore;
+        uint256 recipientGot = underlyingToken.balanceOf(withdrawer) - recipientBefore;
+
+        // bufferRecipient gets sum of both clients' set-asides
+        assertApproxEqAbs(bufferGot, expectedTotalBuffer, 10, "bufferRecipient gets sum of both set-asides");
+        assertGt(bufferGot, 0, "nonzero buffer transferred to recipient");
+
+        // claimer gets the remainder
+        assertEq(returned, recipientGot, "return == delivered to claimer");
+        assertApproxEqAbs(recipientGot + bufferGot, s1 + s2, 10, "total split = total surplus");
+
+        // Principal unchanged
+        assertEq(strategy.principalOf(address(underlyingToken), user1), 1000e18);
+        assertEq(strategy.principalOf(address(underlyingToken), user2), 2000e18);
     }
 
     // ============ relinquishPrincipal TESTS (story 045) ============

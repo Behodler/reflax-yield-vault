@@ -451,9 +451,10 @@ contract VaultWithdrawerTest is Test {
     }
 
     /// @notice End-to-end buffer skim across the authorized set: the return value is reduced by the
-    ///         total set-aside, SurplusSkimmed events still emit per surplus-bearing client.
+    ///         total set-aside (sent to bufferRecipient), SurplusSkimmed events still emit per surplus-bearing client.
     function testSkimSurplusBufferEndToEnd() public {
         address client2 = address(0x6);
+        address bufferRecipientAddr = address(0x7);
 
         vault.setWithdrawer(withdrawer, true);
         vault.setClient(client2, true);
@@ -463,8 +464,9 @@ contract VaultWithdrawerTest is Test {
         // Single yield event after both deposits so the surplus is proportional
         erc4626Vault.simulateYield(800e18); // 4000 -> 4800
 
-        // client gets a 50% buffer; client2 stays at 0
+        // client gets a 50% buffer; client2 stays at 0. Set the global buffer recipient.
         vault.setSetAsideBuffer(client, 50);
+        vault.setSetAsideBufferRecipient(bufferRecipientAddr);
 
         uint256 surplus1 =
             vault.totalBalanceOf(address(depositToken), client) - vault.principalOf(address(depositToken), client);
@@ -478,18 +480,22 @@ contract VaultWithdrawerTest is Test {
         emit SurplusSkimmed(address(depositToken), client2, withdrawer, surplus2, recipient);
 
         uint256 clientBefore = depositToken.balanceOf(client);
+        uint256 bufferRecipientBefore = depositToken.balanceOf(bufferRecipientAddr);
         uint256 recipientBefore = depositToken.balanceOf(recipient);
 
         vm.prank(withdrawer);
         uint256 returned = vault.skimSurplus(address(depositToken), recipient);
 
         uint256 clientGot = depositToken.balanceOf(client) - clientBefore;
+        uint256 bufferRecipientGot = depositToken.balanceOf(bufferRecipientAddr) - bufferRecipientBefore;
         uint256 recipientGot = depositToken.balanceOf(recipient) - recipientBefore;
 
-        // client got ~50% of its surplus back as a set-aside buffer
-        assertApproxEqAbs(clientGot, surplus1 / 2, 5, "client set-aside ~ 50% of its surplus");
-        assertGt(clientGot, 0);
-        // return value == what recipient actually received, and is reduced by the set-aside
+        // client receives nothing back (buffer goes to bufferRecipient)
+        assertEq(clientGot, 0, "client receives nothing back");
+        // bufferRecipient got ~50% of client's surplus as the set-aside
+        assertApproxEqAbs(bufferRecipientGot, surplus1 / 2, 5, "bufferRecipient set-aside ~ 50% of client's surplus");
+        assertGt(bufferRecipientGot, 0);
+        // return value == what skim recipient actually received, reduced by the set-aside
         assertEq(returned, recipientGot, "return == recipient delivered");
         assertApproxEqAbs(recipientGot, surplus1 / 2 + surplus2, 6, "recipient = remainder of client + all of client2");
 

@@ -286,8 +286,15 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
             return underlyingReceived;
         }
 
-        // BUFFERED PATH — split the actual proceeds: each client gets its proportional share of the
-        // set-aside, the remainder goes to `recipient`. Principal tracking intentionally untouched.
+        // LOUD GUARD — buffers are configured but no recipient has been set: revert instead of silently
+        // sending to address(0) or falling back to per-client distribution.
+        require(
+            setAsideBufferRecipient != address(0),
+            "AYieldStrategy: setAsideBufferRecipient not set"
+        );
+
+        // BUFFERED PATH — send the aggregate set-aside to setAsideBufferRecipient in a single transfer;
+        // the remainder goes to `recipient`. Principal tracking intentionally untouched.
         return _distributeBuffer(clients, bufferShares, underlyingReceived, totalShares, recipient);
     }
 
@@ -332,14 +339,16 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
     }
 
     /**
-     * @notice Distribute actual swap proceeds: set-aside buffers to clients, remainder to recipient.
+     * @notice Distribute actual swap proceeds: aggregate set-aside buffer to setAsideBufferRecipient,
+     *         remainder to skim recipient.
      * @param clients The client set (parallel to bufferShares)
      * @param bufferShares Per-client buffer shares (indexed by loop position)
      * @param underlyingReceived The actual underlying received from the single swap
      * @param totalShares The aggregate shares sold in the swap
-     * @param recipient The address that receives the remainder
+     * @param recipient The address that receives the remainder (the skim caller's recipient)
      * @return toRecipient The amount delivered to `recipient` (reduced by total set-aside)
-     * @dev Factored out to keep the caller within the EVM stack-depth limit.
+     * @dev All set-aside from all clients is summed into a SINGLE transfer to setAsideBufferRecipient.
+     *      Factored out to keep the caller within the EVM stack-depth limit.
      */
     function _distributeBuffer(
         address[] memory clients,
@@ -354,8 +363,9 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
             uint256 buf = underlyingReceived * bufferShares[i] / totalShares; // actual-tokens, proportional
             if (buf == 0) continue;
             totalSetAside += buf;
-            underlyingToken.safeTransfer(clients[i], buf); // set aside back to the client
         }
+        // Single aggregate transfer to the global set-aside buffer recipient
+        if (totalSetAside > 0) underlyingToken.safeTransfer(setAsideBufferRecipient, totalSetAside);
         toRecipient = underlyingReceived - totalSetAside; // dust (rounding) favors recipient
         if (toRecipient > 0) underlyingToken.safeTransfer(recipient, toRecipient);
         return toRecipient; // RETURN VALUE REDUCED by totalSetAside

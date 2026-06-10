@@ -137,4 +137,17 @@ interface IYieldStrategy {
      * @notice The set-aside buffer percentage (0–100) currently configured for a client.
      */
     function setAsideBufferSize(address client) external view returns (uint256);
+
+    /**
+     * @notice Set the global recipient for aggregated set-aside buffers. Owner-gated.
+     *         Must be non-zero. Must be configured before any skim where totalBufferShares > 0.
+     * @param _recipient The address that will receive all set-aside buffer tokens on each skim.
+     */
+    function setSetAsideBufferRecipient(address _recipient) external;
+
+    /**
+     * @notice The current global set-aside buffer recipient address.
+     *         Returns address(0) if unset (not yet configured).
+     */
+    function setAsideBufferRecipient() external view returns (address);
 }
