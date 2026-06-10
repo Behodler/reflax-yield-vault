@@ -65,8 +65,8 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     /// @notice Withdrawal status enumeration
     enum WithdrawalStatus {
         None, // No withdrawal initiated
-        Initiated, // Withdrawal initiated, in 24-hour waiting period
-        Executable, // Past waiting period, within 48-hour execution window
+        Initiated, // Withdrawal initiated, in 6-hour waiting period
+        Executable, // Past waiting period, within 72-hour execution window
         Expired // Past execution window, state reset needed
     }
 
@@ -81,9 +81,9 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     mapping(address => mapping(address => WithdrawalState)) public withdrawalStates;
 
     /// @notice Time constants for withdrawal phases
-    uint256 public constant WAITING_PERIOD = 24 hours; // Phase 1 duration
-    uint256 public constant EXECUTION_WINDOW = 48 hours; // Phase 2 duration
-    uint256 public constant TOTAL_DURATION = WAITING_PERIOD + EXECUTION_WINDOW; // 72 hours total
+    uint256 public constant WAITING_PERIOD = 6 hours; // Phase 1 duration
+    uint256 public constant EXECUTION_WINDOW = 72 hours; // Phase 2 duration
+    uint256 public constant TOTAL_DURATION = WAITING_PERIOD + EXECUTION_WINDOW; // 78 hours total
 
     // ============ EVENTS ============
 

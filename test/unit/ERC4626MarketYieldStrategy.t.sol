@@ -741,8 +741,8 @@ contract ERC4626MarketYieldStrategyTest is Test {
         vm.prank(owner);
         strategy.totalWithdrawal(address(underlyingToken), client);
 
-        // Advance past waiting period (24 hours)
-        vm.warp(block.timestamp + 24 hours + 1);
+        // Advance past waiting period (6 hours)
+        vm.warp(block.timestamp + 6 hours + 1);
 
         uint256 ownerBalanceBefore = underlyingToken.balanceOf(owner);
 
@@ -769,7 +769,7 @@ contract ERC4626MarketYieldStrategyTest is Test {
         strategy.totalWithdrawal(address(underlyingToken), client);
 
         // Try to execute before waiting period ends
-        vm.warp(block.timestamp + 12 hours);
+        vm.warp(block.timestamp + 3 hours);
 
         vm.expectRevert();
         vm.prank(owner);

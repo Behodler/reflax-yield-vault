@@ -21,8 +21,8 @@ contract TotalWithdrawalTest is Test {
     address public nonOwner = address(4);
 
     uint256 public constant DEPOSIT_AMOUNT = 1000e18;
-    uint256 public constant WAITING_PERIOD = 24 hours;
-    uint256 public constant EXECUTION_WINDOW = 48 hours;
+    uint256 public constant WAITING_PERIOD = 6 hours;
+    uint256 public constant EXECUTION_WINDOW = 72 hours;
     uint256 public constant TOTAL_DURATION = WAITING_PERIOD + EXECUTION_WINDOW;
 
     event WithdrawalInitiated(
@@ -116,13 +116,13 @@ contract TotalWithdrawalTest is Test {
         vault.totalWithdrawal(address(depositToken), client);
 
         // Try to call again during waiting period
-        vm.warp(block.timestamp + 12 hours); // Half way through waiting period
+        vm.warp(block.timestamp + 3 hours); // Half way through waiting period
 
         vm.prank(owner);
         string memory expectedError = string(
             abi.encodePacked(
                 "AYieldStrategy: withdrawal still in waiting period, executable at timestamp: ",
-                vm.toString(block.timestamp + 12 hours)
+                vm.toString(block.timestamp + 3 hours)
             )
         );
         vm.expectRevert(bytes(expectedError));
@@ -393,19 +393,19 @@ contract TotalWithdrawalTest is Test {
         // Execute withdrawals sequentially (warp time between each)
         uint256 ownerBalanceBefore = depositToken.balanceOf(owner);
 
-        // Execute client 1 withdrawal (24 hours after initiation)
+        // Execute client 1 withdrawal (6 hours after initiation)
         vm.warp(startTime + WAITING_PERIOD + 1);
         vm.prank(owner);
         vault.totalWithdrawal(address(depositToken), client);
         assertEq(vault.balanceOf(address(depositToken), client), 0);
 
-        // Execute client 2 withdrawal (24 hours after their initiation)
+        // Execute client 2 withdrawal (6 hours after their initiation)
         vm.warp(startTime + 1 hours + WAITING_PERIOD + 1);
         vm.prank(owner);
         vault.totalWithdrawal(address(depositToken), client2);
         assertEq(vault.balanceOf(address(depositToken), client2), 0);
 
-        // Execute client 3 withdrawal (24 hours after their initiation)
+        // Execute client 3 withdrawal (6 hours after their initiation)
         vm.warp(startTime + 2 hours + WAITING_PERIOD + 1);
         vm.prank(owner);
         vault.totalWithdrawal(address(depositToken), client3);

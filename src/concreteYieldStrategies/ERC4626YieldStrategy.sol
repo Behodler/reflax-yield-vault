@@ -62,6 +62,28 @@ contract ERC4626YieldStrategy is AYieldStrategy {
         return vault.convertToAssets(vault.balanceOf(address(this)));
     }
 
+    // ============ PREVIEW FUNCTIONS ============
+
+    /**
+     * @notice Preview the shares that would be received for a deposit of `assets`
+     * @param assets The amount of underlying tokens to preview depositing
+     * @return shares The estimated vault shares that would be received
+     * @dev Delegates directly to the underlying ERC4626 vault's previewDeposit.
+     */
+    function previewDeposit(uint256 assets) external view returns (uint256 shares) {
+        return vault.previewDeposit(assets);
+    }
+
+    /**
+     * @notice Preview the underlying assets that would be received for redeeming `shares`
+     * @param shares The number of vault shares to preview redeeming
+     * @return assets The estimated underlying tokens that would be received
+     * @dev Delegates directly to the underlying ERC4626 vault's previewRedeem.
+     */
+    function previewRedeem(uint256 shares) external view returns (uint256 assets) {
+        return vault.previewRedeem(shares);
+    }
+
     // ============ INTERNAL VAULT-INTERACTION HOOKS ============
 
     /**
@@ -85,8 +107,10 @@ contract ERC4626YieldStrategy is AYieldStrategy {
         sharesReceived = vault.deposit(amount, address(this));
         require(sharesReceived > 0, "ERC4626YieldStrategy: no shares received");
 
-        // Full-credit default: the booked principal equals the nominal amount.
-        creditedPrincipal = amount;
+        // Credit the vault's preview of what the received shares are worth, not the raw nominal
+        // amount. This avoids over-crediting principal when the vault charges an entry fee or
+        // rounds shares down — the credited principal reflects the actual position value booked.
+        creditedPrincipal = vault.previewRedeem(sharesReceived);
     }
 
     /**

@@ -168,13 +168,14 @@ contract VaultWithdrawerTest is Test {
         vault.skimSurplus(address(depositToken), recipient);
         assertEq(erc4626Vault.redeemCount() - redeemsBefore, 1, "exactly one redeem for all clients");
 
-        // Both principals untouched
-        assertEq(vault.balanceOf(address(depositToken), client), 1000e18);
-        assertEq(vault.balanceOf(address(depositToken), client2), 2000e18);
+        // Both principals untouched (approxEq because creditedPrincipal = previewRedeem(shares)
+        // can differ by 1 wei from nominal when share price != 1 at deposit time).
+        assertApproxEqAbs(vault.balanceOf(address(depositToken), client), 1000e18, 1);
+        assertApproxEqAbs(vault.balanceOf(address(depositToken), client2), 2000e18, 1);
 
         // Both clients' surplus skimmed -> totals back to principal
-        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client), 1000e18, 2);
-        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client2), 2000e18, 2);
+        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client), vault.principalOf(address(depositToken), client), 2);
+        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client2), vault.principalOf(address(depositToken), client2), 2);
     }
 
     function testSkimSurplusSingleClientFullSurplus() public {
@@ -225,9 +226,10 @@ contract VaultWithdrawerTest is Test {
         vm.prank(withdrawer);
         vault.skimSurplus(address(depositToken), recipient);
 
-        // client2's principal and surplus remain in the strategy (recoverable via totalWithdrawal)
-        assertEq(vault.principalOf(address(depositToken), client2), 1000e18);
-        assertGt(vault.totalBalanceOf(address(depositToken), client2), 1000e18);
+        // client2's principal and surplus remain in the strategy (recoverable via totalWithdrawal).
+        // creditedPrincipal = previewRedeem(shares) can be 1 wei below nominal when share price > 1 at deposit time.
+        assertApproxEqAbs(vault.principalOf(address(depositToken), client2), 1000e18, 1);
+        assertGt(vault.totalBalanceOf(address(depositToken), client2), vault.principalOf(address(depositToken), client2));
     }
 
     function testSkimSurplusIncludesNewlyAuthorizedClient() public {
