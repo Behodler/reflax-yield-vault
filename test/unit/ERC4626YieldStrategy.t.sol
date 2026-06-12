@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import "../../src/concreteYieldStrategies/ERC4626YieldStrategy.sol";
 import "../../src/mocks/MockERC20.sol";
 import "../mocks/MockERC4626Vault.sol";
+import "../mocks/MockStateChangingPreviewVault.sol";
 
 /**
  * @title ERC4626YieldStrategyTest
@@ -510,6 +511,69 @@ contract ERC4626YieldStrategyTest is Test {
         // that the credited principal is less than the nominal and that the total deposited is correct.
         assertLt(credited2, deposit2, "credited principal < nominal deposit due to fee");
         assertGt(strategy.totalBalanceOf(address(underlyingToken), user2), 0, "user2 has positive totalBalance");
+    }
+
+    // ============ YS-01: STATE-CHANGING previewRedeem (AUTOPOOL STATICCALL) TESTS ============
+
+    /// @notice YS-01 regression: depositing into a strategy that wraps a vault whose `previewRedeem`
+    ///         mutates state (a faithful Tokemak-Autopool simulation) must NOT revert, because the
+    ///         fixed credit path uses `convertToAssets` (STATICCALL-safe) instead of `previewRedeem`.
+    /// @dev Pre-fix (creditedPrincipal = vault.previewRedeem(sharesReceived)) this deposit reverts
+    ///      with StateChangeDuringStaticCall. Post-fix it credits convertToAssets(sharesReceived).
+    ///      The vault is seeded to a non-1:1 share ratio so convertToAssets(shares) != shares,
+    ///      proving the credit is the real exchange-rate value (not a trivial pass-through).
+    function testAcquireShares_StateChangingPreviewRedeem_Succeeds() public {
+        // Deploy a strategy over the state-changing-previewRedeem mock.
+        MockStateChangingPreviewVault scVault =
+            new MockStateChangingPreviewVault("SC Vault", "scV", address(underlyingToken));
+        vm.prank(owner);
+        ERC4626YieldStrategy scStrategy =
+            new ERC4626YieldStrategy(owner, address(underlyingToken), address(scVault));
+
+        vm.prank(owner);
+        scStrategy.setClient(client, true);
+        vm.prank(client);
+        underlyingToken.approve(address(scStrategy), type(uint256).max);
+
+        // Seed the vault to a non-1:1 ratio: a 1000-asset deposit mints 1000 shares, then yield is
+        // added so convertToAssets(shares) > shares (share price > 1).
+        vm.prank(client);
+        scStrategy.deposit(address(underlyingToken), 1000e18, user2);
+        scVault.simulateYield(500e18); // totalAssets 1500, supply 1000 -> price 1.5
+
+        // Sanity: ratio is now non-1:1 so convertToAssets is not a trivial identity.
+        assertGt(scVault.convertToAssets(1e18), 1e18, "ratio must be non-1:1 for a meaningful credit");
+
+        // Deposit as client for user1 — must NOT revert (pre-fix: StateChangeDuringStaticCall).
+        uint256 sharesBefore = scVault.balanceOf(address(scStrategy));
+        vm.prank(client);
+        scStrategy.deposit(address(underlyingToken), 1000e18, user1);
+        uint256 sharesReceived = scVault.balanceOf(address(scStrategy)) - sharesBefore;
+
+        // Credited principal == convertToAssets(sharesReceived), the STATICCALL-safe exchange value.
+        assertEq(
+            scStrategy.principalOf(address(underlyingToken), user1),
+            scVault.convertToAssets(sharesReceived),
+            "principal == convertToAssets(sharesReceived)"
+        );
+    }
+
+    /// @notice YS-01 root-cause isolation (mirrors the audit's on-chain check): a low-level
+    ///         STATICCALL to the mock's `previewRedeem` reverts, while a STATICCALL to
+    ///         `convertToAssets` succeeds — documenting the mechanism independently of the strategy.
+    function testRootCause_PreviewRedeemReverts_ConvertToAssetsSucceeds() public {
+        MockStateChangingPreviewVault scVault =
+            new MockStateChangingPreviewVault("SC Vault", "scV", address(underlyingToken));
+
+        // STATICCALL to previewRedeem must fail (state write under static frame).
+        (bool prSuccess,) =
+            address(scVault).staticcall(abi.encodeWithSignature("previewRedeem(uint256)", uint256(1e18)));
+        assertFalse(prSuccess, "previewRedeem must revert under STATICCALL");
+
+        // STATICCALL to convertToAssets must succeed (purely arithmetic).
+        (bool ctaSuccess,) =
+            address(scVault).staticcall(abi.encodeWithSignature("convertToAssets(uint256)", uint256(1e18)));
+        assertTrue(ctaSuccess, "convertToAssets must succeed under STATICCALL");
     }
 
     // ============ ZERO-AMOUNT EDGE CASES ============

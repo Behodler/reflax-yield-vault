@@ -107,10 +107,12 @@ contract ERC4626YieldStrategy is AYieldStrategy {
         sharesReceived = vault.deposit(amount, address(this));
         require(sharesReceived > 0, "ERC4626YieldStrategy: no shares received");
 
-        // Credit the vault's preview of what the received shares are worth, not the raw nominal
-        // amount. This avoids over-crediting principal when the vault charges an entry fee or
-        // rounds shares down — the credited principal reflects the actual position value booked.
-        creditedPrincipal = vault.previewRedeem(sharesReceived);
+        // Credit the current exchange-rate value of the shares actually received (not the raw
+        // nominal amount), so entry-fee / share-rounding discrepancies are not over-credited.
+        // Use convertToAssets (NOT previewRedeem): convertToAssets is ERC4626-mandated
+        // STATICCALL-safe, whereas some real vaults (e.g. Tokemak Autopools) mutate state inside
+        // previewRedeem and revert with StateChangeDuringStaticCall when called as an external view.
+        creditedPrincipal = vault.convertToAssets(sharesReceived);
     }
 
     /**

@@ -111,7 +111,7 @@ contract MockERC4626Vault is MockERC20 {
         return _convertToSharesInternal(assets);
     }
 
-    function previewRedeem(uint256 shares) public view returns (uint256) {
+    function previewRedeem(uint256 shares) public view virtual returns (uint256) {
         return _convertToAssetsInternal(shares);
     }
 
