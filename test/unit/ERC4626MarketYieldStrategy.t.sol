@@ -37,6 +37,26 @@ contract ERC4626MarketYieldStrategyTest is Test {
         return amount * (strategy.MAX_BPS() - strategy.slippageToleranceBps()) / strategy.MAX_BPS();
     }
 
+    /// @dev Underlying floor the strategy guarantees on exit for a requested `amount`. The exit-side
+    ///      twin of `_haircut` above: it mirrors ERC4626MarketYieldStrategy._disposeShares (the
+    ///      convertToShares -> share-balance cap -> convertToAssets -> bps haircut chain), whereas
+    ///      `_haircut` mirrors the deposit-side `_creditedPrincipal`. Kept separate deliberately.
+    function _exitFloor(uint256 amount) internal view returns (uint256) {
+        uint256 sharesToSell = erc4626Vault.convertToShares(amount);
+        uint256 availableShares = erc4626Vault.balanceOf(address(strategy));
+        if (sharesToSell > availableShares) {
+            sharesToSell = availableShares;
+        }
+        uint256 idealUnderlying = erc4626Vault.convertToAssets(sharesToSell);
+        return idealUnderlying * (strategy.MAX_BPS() - strategy.slippageToleranceBps()) / strategy.MAX_BPS();
+    }
+
+    /// @dev The gross request whose exit haircut still leaves `net`: ceil(net * MAX_BPS / (MAX_BPS - bps)).
+    function _grossUp(uint256 net) internal view returns (uint256) {
+        uint256 denom = strategy.MAX_BPS() - strategy.slippageToleranceBps();
+        return (net * strategy.MAX_BPS() + denom - 1) / denom;
+    }
+
     function setUp() public {
         // Deploy mock tokens
         underlyingToken = new MockERC20("Underlying", "UNDERLYING", 18);
@@ -357,6 +377,212 @@ contract ERC4626MarketYieldStrategyTest is Test {
 
         // Principal should be zero (capped to available)
         assertEq(strategy.principalOf(address(underlyingToken), client), 0);
+    }
+
+    // ============ EXIT PREVIEW TESTS ============
+    // previewExitFor is the exit-side counterpart of the story-043 deposit haircut: it answers
+    // "what must I request to end up holding `netWanted`, and what am I guaranteed if I do?".
+    // netGuaranteed is a FLOOR (the swap's minOut), never a prediction — every assertion below
+    // that involves a real AMM execution therefore uses >=, never ==.
+
+    /// @notice Preview grosses the request up through the exit haircut and quotes the matching floor.
+    function testPreviewExitForGrossesUpForHaircut() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        uint256 netWanted = 100e18;
+        (uint256 grossToRequest, uint256 netGuaranteed) =
+            strategy.previewExitFor(address(underlyingToken), client, netWanted);
+
+        assertEq(grossToRequest, _grossUp(netWanted), "gross is the ceil-rounded algebraic inverse");
+        assertGt(grossToRequest, netWanted, "a haircut strategy must ask for more than it wants");
+        assertEq(netGuaranteed, _exitFloor(grossToRequest), "floor mirrors _disposeShares minOut");
+        assertGe(netGuaranteed, netWanted, "the guaranteed floor must cover what the caller wanted");
+    }
+
+    /// @notice At zero slippage tolerance the preview collapses to the identity.
+    function testPreviewExitForZeroSlippageIsIdentity() public {
+        vm.prank(owner);
+        strategy.setSlippageTolerance(0);
+
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        (uint256 grossToRequest, uint256 netGuaranteed) =
+            strategy.previewExitFor(address(underlyingToken), client, 400e18);
+
+        assertEq(grossToRequest, 400e18, "no haircut, no gross-up");
+        assertEq(netGuaranteed, 400e18, "no haircut, full guarantee");
+    }
+
+    /// @notice A 5% tolerance grosses up by exactly 1/0.95 and floors back at or above the request.
+    function testPreviewExitForAtFivePercentTolerance() public {
+        vm.prank(owner);
+        strategy.setSlippageTolerance(500);
+
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        (uint256 grossToRequest, uint256 netGuaranteed) =
+            strategy.previewExitFor(address(underlyingToken), client, 100e18);
+
+        assertEq(grossToRequest, (uint256(100e18) * 10000 + 9499) / 9500, "ceil(net * MAX_BPS / (MAX_BPS - bps))");
+        assertEq(netGuaranteed, _exitFloor(grossToRequest));
+        assertGe(netGuaranteed, 100e18);
+    }
+
+    /// @notice MAX_BPS tolerance guarantees nothing: (0, 0), NOT a division-by-zero Panic(0x12).
+    function testPreviewExitForAtMaxBpsReturnsZeroWithoutPanic() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        uint256 maxBps = strategy.MAX_BPS();
+        vm.prank(owner);
+        strategy.setSlippageTolerance(maxBps);
+
+        (uint256 grossToRequest, uint256 netGuaranteed) =
+            strategy.previewExitFor(address(underlyingToken), client, 100e18);
+
+        assertEq(grossToRequest, 0, "no request can guarantee anything at 100% tolerance");
+        assertEq(netGuaranteed, 0, "nothing is guaranteed at 100% tolerance");
+    }
+
+    /// @notice The gross request is capped to the account's booked principal, exactly as
+    ///         _withdrawInternal caps it — the preview never quotes a request the base would shrink.
+    function testPreviewExitForCapsToAccountPrincipal() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        uint256 principal = strategy.principalOf(address(underlyingToken), client);
+
+        (uint256 grossToRequest, uint256 netGuaranteed) =
+            strategy.previewExitFor(address(underlyingToken), client, 10_000e18);
+
+        assertEq(grossToRequest, principal, "capped to clientBalances[token][account]");
+        assertEq(netGuaranteed, _exitFloor(principal));
+        assertLt(netGuaranteed, 10_000e18, "an over-request is honestly quoted short, not padded");
+    }
+
+    /// @notice An account with no principal is quoted nothing rather than reverting.
+    function testPreviewExitForUnknownAccountReturnsZero() public {
+        (uint256 grossToRequest, uint256 netGuaranteed) =
+            strategy.previewExitFor(address(underlyingToken), randomUser, 100e18);
+
+        assertEq(grossToRequest, 0);
+        assertEq(netGuaranteed, 0);
+    }
+
+    /// @notice A zero request is quoted zero.
+    function testPreviewExitForZeroNetWanted() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        (uint256 grossToRequest, uint256 netGuaranteed) = strategy.previewExitFor(address(underlyingToken), client, 0);
+
+        assertEq(grossToRequest, 0);
+        assertEq(netGuaranteed, 0);
+    }
+
+    /// @notice Only the underlying token is previewable.
+    function testPreviewExitForRevertsForWrongToken() public {
+        vm.expectRevert("AYieldStrategy: only underlying token supported");
+        strategy.previewExitFor(address(erc4626Vault), client, 100e18);
+    }
+
+    /// @notice Round trip: requesting grossToRequest under unmoved AMM state delivers AT LEAST
+    ///         netGuaranteed. Never assert equality — the AMM pays anywhere at or above minOut.
+    function testPreviewExitForRoundTripDeliversAtLeastFloor() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        (uint256 grossToRequest, uint256 netGuaranteed) =
+            strategy.previewExitFor(address(underlyingToken), client, 300e18);
+
+        uint256 balanceBefore = underlyingToken.balanceOf(client);
+        vm.prank(client);
+        strategy.withdraw(address(underlyingToken), grossToRequest, client);
+        uint256 delivered = underlyingToken.balanceOf(client) - balanceBefore;
+
+        assertGe(delivered, netGuaranteed, "delivery must never fall below the quoted floor");
+        assertGe(delivered, 300e18, "and therefore covers the net the caller wanted");
+    }
+
+    /// @notice Round trip at a hostile-but-tolerable AMM rate: delivery still clears the floor.
+    function testPreviewExitForRoundTripAtUnfavorableRateClearsFloor() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        // AMM pays 0.5% under ideal — inside the 1% tolerance, so the swap succeeds.
+        ammAdapter.setExchangeRate(address(erc4626Vault), address(underlyingToken), 0.995e18);
+
+        (uint256 grossToRequest, uint256 netGuaranteed) =
+            strategy.previewExitFor(address(underlyingToken), client, 300e18);
+
+        uint256 balanceBefore = underlyingToken.balanceOf(client);
+        vm.prank(client);
+        strategy.withdraw(address(underlyingToken), grossToRequest, client);
+        uint256 delivered = underlyingToken.balanceOf(client) - balanceBefore;
+
+        assertGe(delivered, netGuaranteed, "floor holds even when the AMM under-delivers vs ideal");
+        assertLt(delivered, grossToRequest, "the haircut is real: less arrives than was requested");
+    }
+
+    /// @notice Favourable AMM: delivery EXCEEDS the quote. The quote is a floor, not an expectation
+    ///         (cf. testDepositWithFavorableAMMRate).
+    function testPreviewExitForFavorableAMMExceedsQuote() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        ammAdapter.setExchangeRate(address(erc4626Vault), address(underlyingToken), 1.02e18);
+
+        (uint256 grossToRequest, uint256 netGuaranteed) =
+            strategy.previewExitFor(address(underlyingToken), client, 300e18);
+
+        uint256 balanceBefore = underlyingToken.balanceOf(client);
+        vm.prank(client);
+        strategy.withdraw(address(underlyingToken), grossToRequest, client);
+        uint256 delivered = underlyingToken.balanceOf(client) - balanceBefore;
+
+        assertGt(delivered, netGuaranteed, "a favourable AMM beats the floor");
+    }
+
+    /// @notice When the strategy's own share balance binds before the requested amount does, the
+    ///         quote is the value of the shares it actually holds — mirroring the cap in
+    ///         _disposeShares, not the cap in _withdrawInternal.
+    function testPreviewExitForShareBalanceCapBinds() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        // Halve the vault's share price, so convertToShares(principal) now exceeds the shares held.
+        erc4626Vault.simulateLoss(erc4626Vault.totalAssets() / 2);
+
+        uint256 principal = strategy.principalOf(address(underlyingToken), client);
+        uint256 heldShares = erc4626Vault.balanceOf(address(strategy));
+        assertGt(erc4626Vault.convertToShares(principal), heldShares, "share cap must actually bind");
+
+        (uint256 grossToRequest, uint256 netGuaranteed) =
+            strategy.previewExitFor(address(underlyingToken), client, 10_000e18);
+
+        assertEq(grossToRequest, principal, "principal cap still governs the request");
+        assertEq(netGuaranteed, _exitFloor(principal), "quote reflects only the shares actually held");
+        assertLt(netGuaranteed, principal, "an underwater position cannot guarantee its own principal");
+    }
+
+    /// @notice previewExitFor is genuinely `view`: a low-level STATICCALL succeeds.
+    function testPreviewExitForSurvivesStaticcall() public {
+        vm.prank(client);
+        strategy.deposit(address(underlyingToken), 1000e18, client);
+
+        (bool ok, bytes memory data) = address(strategy)
+            .staticcall(
+                abi.encodeWithSignature(
+                    "previewExitFor(address,address,uint256)", address(underlyingToken), client, 100e18
+                )
+            );
+        assertTrue(ok, "previewExitFor must be STATICCALL-safe");
+        (uint256 grossToRequest, uint256 netGuaranteed) = abi.decode(data, (uint256, uint256));
+        assertGt(grossToRequest, 0);
+        assertGt(netGuaranteed, 0);
     }
 
     // ============ SLIPPAGE TOLERANCE TESTS ============

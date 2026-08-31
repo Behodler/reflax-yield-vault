@@ -174,8 +174,12 @@ contract VaultWithdrawerTest is Test {
         assertApproxEqAbs(vault.balanceOf(address(depositToken), client2), 2000e18, 1);
 
         // Both clients' surplus skimmed -> totals back to principal
-        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client), vault.principalOf(address(depositToken), client), 2);
-        assertApproxEqAbs(vault.totalBalanceOf(address(depositToken), client2), vault.principalOf(address(depositToken), client2), 2);
+        assertApproxEqAbs(
+            vault.totalBalanceOf(address(depositToken), client), vault.principalOf(address(depositToken), client), 2
+        );
+        assertApproxEqAbs(
+            vault.totalBalanceOf(address(depositToken), client2), vault.principalOf(address(depositToken), client2), 2
+        );
     }
 
     function testSkimSurplusSingleClientFullSurplus() public {
@@ -229,7 +233,9 @@ contract VaultWithdrawerTest is Test {
         // client2's principal and surplus remain in the strategy (recoverable via totalWithdrawal).
         // creditedPrincipal = previewRedeem(shares) can be 1 wei below nominal when share price > 1 at deposit time.
         assertApproxEqAbs(vault.principalOf(address(depositToken), client2), 1000e18, 1);
-        assertGt(vault.totalBalanceOf(address(depositToken), client2), vault.principalOf(address(depositToken), client2));
+        assertGt(
+            vault.totalBalanceOf(address(depositToken), client2), vault.principalOf(address(depositToken), client2)
+        );
     }
 
     function testSkimSurplusIncludesNewlyAuthorizedClient() public {
