@@ -31,6 +31,56 @@ interface IYieldStrategy {
      */
     function withdraw(address token, uint256 amount, address recipient) external;
 
+    /**
+     * @notice Size a withdrawal against this strategy's exit haircut: given the net underlying a
+     *         caller must end up holding, report what it has to request and what it is guaranteed.
+     * @param token The token address (must be the strategy's underlying token)
+     * @param account The account whose booked principal the exit would be debited from. Present
+     *        because the per-account cap `min(amount, clientBalances[token][account])` lives in the
+     *        base's `_withdrawInternal` and is replicated faithfully here — the quote never names a
+     *        request the base would silently shrink.
+     * @param netWanted The net underlying amount the caller needs to be holding after `withdraw`
+     * @return grossToRequest The `amount` to pass to `withdraw` in order to end up with `netWanted`,
+     *         capped to the account's available principal. Direct (full-credit) strategies return
+     *         `netWanted` unchanged (subject to that cap) because their exit applies no haircut.
+     *         The market strategy returns the algebraic inverse of the story-043 exit haircut,
+     *         `ceil(netWanted * MAX_BPS / (MAX_BPS - slippageToleranceBps))`, which is > `netWanted`.
+     *         Returning this alongside `netGuaranteed` in ONE static call is the point of the
+     *         function: the share round-trip does not cleanly invert, so a consumer must never try
+     *         to derive one figure from the other, call twice, or iterate.
+     * @return netGuaranteed The net underlying the strategy guarantees will be delivered if exactly
+     *         `grossToRequest` is withdrawn. Direct strategies return `grossToRequest`. The market
+     *         strategy returns the swap's `minOut` floor for that request. When the cap binds — the
+     *         account's principal, or (market) the shares the strategy actually holds — this comes
+     *         back BELOW `netWanted`, which is the honest answer: the position cannot cover it.
+     *
+     *         ⚠️ `netGuaranteed` IS A FLOOR, NOT AN EXPECTATION, AND NOT A SETTLEMENT FIGURE. ⚠️
+     *         It is the worst case the strategy will accept, not what it expects to receive.
+     *         Consumers MUST size their arithmetic against it and MUST THEN MEASURE THE ACTUAL
+     *         BALANCE DELTA ACROSS `withdraw` — treating this quote as the delivered amount
+     *         re-introduces exactly the shortfall bug the function exists to let callers avoid.
+     *         Three independent reasons, none of which can be engineered away here:
+     *           1. The AMM pays anywhere AT OR ABOVE `minOut`; the real figure is only known
+     *              post-trade, and `IAMMAdapter` exposes no quote view. Delivery routinely EXCEEDS
+     *              the quote (see `testDepositWithFavorableAMMRate` for the deposit-side twin).
+     *           2. The quote reads live vault and AMM state and is manipulable within a block.
+     *           3. It is built on `convertToAssets`, the FEE-FREE ideal conversion (story 049 —
+     *              `previewRedeem` is unusable because Tokemak-Autopool-style vaults mutate state
+     *              inside it and trap under STATICCALL). On a vault that charges a withdrawal or
+     *              exit fee the preview therefore OVER-QUOTES.
+     *         This is the same "actual delivered vs snapshot/ideal" divergence documented in the
+     *         repo's CLAUDE.md section `## skimSurplus return value vs. SurplusSkimmed events`,
+     *         whose warning applies verbatim: for `ERC4626MarketYieldStrategy` the swap output is
+     *         governed by the AMM rate, so THE GAP CAN BE LARGE IN EITHER DIRECTION.
+     * @dev Read-only and STATICCALL-safe by construction. `(0, 0)` is a valid answer meaning "this
+     *      strategy can guarantee nothing at all here" — an empty position, an unknown account, or
+     *      (market) a 100% slippage tolerance, where no request could carry a guarantee.
+     */
+    function previewExitFor(address token, address account, uint256 netWanted)
+        external
+        view
+        returns (uint256 grossToRequest, uint256 netGuaranteed);
+
     /// @notice Write down the caller's own recorded principal by `amount`, WITHOUT touching the
     ///         underlying vault's shares (no redeem/withdraw/transfer). Decrements both
     ///         clientBalances[token][msg.sender] and totalDeposited[token], preserving the

@@ -244,10 +244,7 @@ contract ERC4626YieldStrategy is AYieldStrategy {
 
         // LOUD GUARD — buffers are configured but no recipient has been set: revert instead of silently
         // sending to address(0) or falling back to per-client distribution.
-        require(
-            setAsideBufferRecipient != address(0),
-            "AYieldStrategy: setAsideBufferRecipient not set"
-        );
+        require(setAsideBufferRecipient != address(0), "AYieldStrategy: setAsideBufferRecipient not set");
 
         // BUFFERED PATH — redeem to self, then send the aggregate set-aside to setAsideBufferRecipient
         // in a single transfer; the remainder goes to `recipient`. Principal untouched.
