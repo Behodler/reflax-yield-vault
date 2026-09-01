@@ -550,39 +550,6 @@ abstract contract AYieldStrategy is IYieldStrategy, IPausable, Ownable, Reentran
     }
 
     /**
-     * @notice Default exit preview: the capped identity. Correct for every strategy whose exit
-     *         applies no haircut — i.e. every direct (full-credit) strategy, where `_disposeShares`
-     *         redeems at the vault rate with no `minOut` and no bps deduction. Only a strategy that
-     *         imposes an exit haircut (currently `ERC4626MarketYieldStrategy`) overrides this.
-     * @param token The token address (must be underlying token)
-     * @param account The account whose principal the exit would be debited from
-     * @param netWanted The net underlying the caller needs to end up holding
-     * @return grossToRequest `netWanted`, capped to the account's available principal
-     * @return netGuaranteed Identical to `grossToRequest` — a direct exit deducts nothing
-     * @dev The cap replicates `_withdrawInternal`'s `min(amount, clientBalances[token][account])`
-     *      exactly, which is why the signature carries `account`: the cap is per-account and lives
-     *      in this base, not in any concrete. Deliberately reads `clientBalances` directly rather
-     *      than `getTotalShares()`, which is `external` and so not internally callable.
-     *
-     *      Read the netGuaranteed documentation on IYieldStrategy.previewExitFor before consuming
-     *      this: the figure is a FLOOR, and consumers must still measure the real balance delta
-     *      across `withdraw`.
-     */
-    function previewExitFor(address token, address account, uint256 netWanted)
-        external
-        view
-        virtual
-        override
-        returns (uint256 grossToRequest, uint256 netGuaranteed)
-    {
-        require(token == address(underlyingToken), "AYieldStrategy: only underlying token supported");
-
-        uint256 availablePrincipal = clientBalances[token][account];
-        grossToRequest = netWanted > availablePrincipal ? availablePrincipal : netWanted;
-        netGuaranteed = grossToRequest;
-    }
-
-    /**
      * @notice Get balance (returns principal for backward compatibility)
      * @param token The token address
      * @param account The account address

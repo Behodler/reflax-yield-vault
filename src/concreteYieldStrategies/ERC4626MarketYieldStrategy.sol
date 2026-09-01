@@ -5,7 +5,6 @@ import "../AYieldStrategy.sol";
 import "../AMMAdapters/IAMMAdapter.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
 import "@openzeppelin/contracts/interfaces/IERC4626.sol";
 
 /**
@@ -106,83 +105,6 @@ contract ERC4626MarketYieldStrategy is AYieldStrategy {
      */
     function _creditedPrincipal(uint256 amount) internal view returns (uint256) {
         return amount * (MAX_BPS - slippageToleranceBps) / MAX_BPS;
-    }
-
-    /**
-     * @notice The underlying floor the AMM swap is allowed to deliver when exiting `amount`.
-     * @param amount The gross underlying amount a withdrawal would request
-     * @return The `minOut` this strategy would pass to the AMM for that request
-     * @dev Mirrors `_disposeShares` exactly — the same convertToShares -> share-balance cap ->
-     *      convertToAssets -> bps haircut chain — so the quote and the swap floor cannot drift
-     *      apart. This is the EXIT-side twin of `_creditedPrincipal`, which is the DEPOSIT-side
-     *      haircut; do not conflate them, and do not confuse this with the pro-rata sizing in
-     *      `_totalWithdraw` or the surplus sizing in `_skimSurplus`, which are different paths.
-     *
-     *      STATICCALL safety (story 049): built exclusively on `convertToShares`/`convertToAssets`.
-     *      It must never call `previewRedeem`/`previewWithdraw` — Tokemak-Autopool-style vaults
-     *      mutate state inside `previewRedeem` and trap with StateChangeDuringStaticCall, burning
-     *      all forwarded gas. The accepted cost is that `convertToAssets` is the fee-free ideal
-     *      conversion, so on a fee-charging vault this floor over-quotes.
-     */
-    function _exitFloor(uint256 amount) internal view returns (uint256) {
-        uint256 sharesToSell = vault.convertToShares(amount);
-        uint256 availableShares = vault.balanceOf(address(this));
-        if (sharesToSell > availableShares) {
-            sharesToSell = availableShares;
-        }
-        uint256 idealUnderlying = vault.convertToAssets(sharesToSell);
-        return idealUnderlying * (MAX_BPS - slippageToleranceBps) / MAX_BPS;
-    }
-
-    // ============ EXIT PREVIEW ============
-
-    /**
-     * @notice Exit preview for the market strategy: grosses `netWanted` up through the exit haircut
-     *         and reports the guaranteed floor for the resulting request.
-     * @param token The token address (must be underlying token)
-     * @param account The account whose principal the exit would be debited from
-     * @param netWanted The net underlying the caller needs to end up holding
-     * @return grossToRequest `ceil(netWanted * MAX_BPS / (MAX_BPS - slippageToleranceBps))`, capped
-     *         to the account's available principal exactly as `_withdrawInternal` caps it. Rounded
-     *         UP so the gross-up never quotes short of `netWanted` by a rounding unit.
-     * @return netGuaranteed The swap floor for `grossToRequest` (see `_exitFloor`). Falls BELOW
-     *         `netWanted` when a cap binds — the account's principal, or the shares the strategy
-     *         actually holds — which is the honest report that the position cannot cover the ask.
-     * @dev ⚠️ `netGuaranteed` IS A FLOOR, NOT AN EXPECTATION. The AMM pays anywhere at or above it
-     *      and the gap can be large in EITHER direction. Consumers MUST measure the real balance
-     *      delta across `withdraw`; see the full warning on `IYieldStrategy.previewExitFor`.
-     *
-     *      DIVISION-BY-ZERO GUARD (mandatory): `setSlippageTolerance` permits exactly `MAX_BPS`, at
-     *      which the algebraic inverse would divide by zero and panic (`Panic(0x12)`). At that
-     *      setting the strategy genuinely guarantees NOTHING — `minOut` is 0, so any output is
-     *      acceptable — and the honest quote is `(0, 0)`. Returning it, rather than panicking, lets
-     *      a caller distinguish "this strategy can guarantee no output" from a low-level failure
-     *      and handle it as the operational alarm it is.
-     */
-    function previewExitFor(address token, address account, uint256 netWanted)
-        external
-        view
-        override
-        returns (uint256 grossToRequest, uint256 netGuaranteed)
-    {
-        require(token == address(underlyingToken), "AYieldStrategy: only underlying token supported");
-
-        uint256 denominator = MAX_BPS - slippageToleranceBps;
-        if (denominator == 0) {
-            // 100% slippage tolerance: minOut is always 0, so no request carries any guarantee.
-            return (0, 0);
-        }
-
-        grossToRequest = Math.ceilDiv(netWanted * MAX_BPS, denominator);
-
-        // Read the base's ledger directly: `principalOf` is `external` and so not internally
-        // callable, exactly as `getTotalShares()` is not.
-        uint256 availablePrincipal = clientBalances[token][account];
-        if (grossToRequest > availablePrincipal) {
-            grossToRequest = availablePrincipal;
-        }
-
-        netGuaranteed = _exitFloor(grossToRequest);
     }
 
     // ============ INTERNAL VAULT-INTERACTION HOOKS ============
