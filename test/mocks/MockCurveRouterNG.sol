@@ -12,6 +12,13 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  *      (tokenIn, tokenOut) exchange rate (1e18 basis, default 1:1). Stores the last-seen
  *      arguments in public fields so tests can assert the adapter passed them through
  *      unchanged. Must be pre-funded with output tokens in test setUp.
+ *
+ *      Route resolution is faithful to Curve Router NG v1.1: hops execute while
+ *      `_route[2k+1] != 0`, the router stops at the first empty pool slot and delivers
+ *      `_route[2k]`, ignoring every later entry. An executed hop with a zero output token
+ *      reverts (the real router reverts with empty data), as does an executed hop with
+ *      swap_type 0 ("Bad swap type"). Tests therefore cannot pass against a mock that shares
+ *      the old "last non-zero entry" blind spot.
  */
 contract MockCurveRouterNG is ICurveRouterNG {
     using SafeERC20 for IERC20;
@@ -72,13 +79,15 @@ contract MockCurveRouterNG is ICurveRouterNG {
         lastReceiver = _receiver;
         lastCaller = msg.sender;
 
-        // Resolve tokenIn and tokenOut from the route (first and last non-zero slots)
+        // Resolve the delivered token the way Router NG does: walk hops while the pool slot is
+        // non-zero and stop at the first empty one; anything after it is ignored.
         address tokenIn = _route[0];
-        address tokenOut;
-        for (uint256 i = 0; i < 11; i++) {
-            if (_route[i] != address(0)) {
-                tokenOut = _route[i];
-            }
+        address tokenOut = tokenIn;
+        for (uint256 k = 0; k < 5; k++) {
+            if (_route[2 * k + 1] == address(0)) break;
+            tokenOut = _route[2 * k + 2];
+            require(tokenOut != address(0), "MockCurveRouterNG: zero token in executed hop");
+            require(_swap_params[k][2] != 0, "MockCurveRouterNG: Bad swap type");
         }
 
         // Apply configured exchange rate (default 1:1)

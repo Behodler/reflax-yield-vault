@@ -12,6 +12,12 @@ pragma solidity ^0.8.13;
  *      The 11-slot `_route` array interleaves tokens and pools:
  *        [tokenIn, pool0, token1, pool1, token2, ..., tokenOut, 0x0, ...]
  *      padded to 11 slots with zero addresses.
+ *
+ *      Router NG v1.1 executes hop k while `_route[2k+1] != 0`: it stops at the FIRST empty
+ *      pool slot and delivers `_route[2k]`, ignoring every later entry. A gapped route such as
+ *      `[USDe, pool, crvUSD, 0, ..., sUSDe]` therefore delivers crvUSD, not sUSDe. A zero
+ *      intermediate token in the executed prefix reverts with empty data, and swap_type 0 or 9
+ *      on an executed hop reverts "Bad swap type".
  */
 interface ICurveRouterNG {
     /**

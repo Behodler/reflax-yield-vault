@@ -16,6 +16,11 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  *      a swap in either direction reverts until BOTH directions of the pair are configured.
  *      This prevents deploying a half-configured adapter into a strategy that needs round-trip
  *      swaps (which every `ERC4626MarketYieldStrategy` does).
+ *
+ *      Route semantics follow Curve Router NG v1.1: it executes hop k while `path[2k+1] != 0`,
+ *      stops at the first empty pool slot and delivers `path[2k]`, ignoring anything after it.
+ *      `setRoute` therefore enforces contiguity: a stored route can only be one whose executed
+ *      prefix actually delivers `tokenOut` (audit M-01 class fix, ported from SYAHarvester).
  */
 contract CurveAMMAdapter is IAMMAdapter, Ownable {
     using SafeERC20 for IERC20;
@@ -40,6 +45,24 @@ contract CurveAMMAdapter is IAMMAdapter, Ownable {
     /// @notice Emitted when a swap successfully executes
     event Swapped(address indexed tokenIn, address indexed tokenOut, uint256 amountIn, uint256 amountOut);
 
+    /// @notice The route executes no hop (`path[1] == 0`), so it would swap nothing
+    error InvalidRouteEmpty();
+
+    /// @notice The executed prefix delivers `delivered`, not the configured `tokenOut` (`expected`)
+    error InvalidRouteEnd(address expected, address delivered);
+
+    /// @notice `path[index]` is non-zero but lies after the executed prefix, so the router never reaches it
+    error InvalidRouteGap(uint256 index);
+
+    /// @notice The intermediate token `path[index]` of an executed hop is zero
+    error InvalidRouteToken(uint256 index);
+
+    /// @notice `swapParams[hop]` is invalid: an executed hop with swap_type 0 or 9, or a non-zero unexecuted row
+    error InvalidRouteSwapParams(uint256 hop);
+
+    /// @notice `pools[hop]` is non-zero for a hop the router never executes
+    error InvalidRoutePools(uint256 hop);
+
     /**
      * @notice Initialize the CurveAMMAdapter
      * @param _owner Initial owner (typically a multisig in production)
@@ -57,7 +80,18 @@ contract CurveAMMAdapter is IAMMAdapter, Ownable {
      * @param path 11-slot `_route` array to pass to Curve Router NG
      * @param swapParams 5x5 `_swap_params` matrix for the router
      * @param pools 5-slot `_pools` array (base pools for meta-swaps, else zero)
-     * @dev Validates `path[0] == tokenIn` and that the last non-zero entry equals `tokenOut`.
+     * @dev Curve Router NG v1.1 executes hop k while `path[2k+1] != 0` and delivers `path[2k]` at the
+     *      first empty pool slot, ignoring every later entry. With k the number of executed hops, checks
+     *      in this order:
+     *      - `tokenIn != 0`, `tokenOut != 0`, `path[0] == tokenIn` (require-strings, unchanged);
+     *      - k >= 1, i.e. `path[1] != 0` (`InvalidRouteEmpty`): a zero-hop route would swap nothing;
+     *      - no non-zero entry follows the executed prefix, i.e. `path[2k+1..10]` are zero (`InvalidRouteGap`);
+     *      - every executed intermediate token `path[2i]`, `0 < i < k`, is non-zero (`InvalidRouteToken`);
+     *      - the delivered token `path[2k]` equals `tokenOut` (`InvalidRouteEnd`);
+     *      - per hop h in order 0..4: an executed row (h < k) has swap_type `swapParams[h][2]` not 0 and not 9
+     *        (Router NG v1.1 rejects both), and an unexecuted row (h >= k) is all zero
+     *        (`InvalidRouteSwapParams`) with `pools[h] == 0` (`InvalidRoutePools`). Pools of executed hops
+     *        are not constrained (they are base pools for meta-swaps).
      */
     function setRoute(
         address tokenIn,
@@ -70,14 +104,34 @@ contract CurveAMMAdapter is IAMMAdapter, Ownable {
         require(tokenOut != address(0), "CurveAMMAdapter: tokenOut cannot be zero");
         require(path[0] == tokenIn, "CurveAMMAdapter: path[0] must equal tokenIn");
 
-        // Find the last non-zero entry in path and confirm it equals tokenOut
-        address lastToken;
-        for (uint256 i = 0; i < 11; i++) {
-            if (path[i] != address(0)) {
-                lastToken = path[i];
+        // Router NG executes hop k while path[2k+1] != 0 and delivers path[2k] at the first empty pool slot.
+        uint256 k;
+        while (k < 5 && path[2 * k + 1] != address(0)) k++;
+        // A zero-hop route is a no-op that would hand tokenIn straight back; never store one.
+        if (k == 0) revert InvalidRouteEmpty();
+        // Nothing may follow the executed prefix: a trailing entry is never executed (empty when k == 5).
+        for (uint256 i = 2 * k + 1; i < 11; i++) {
+            if (path[i] != address(0)) revert InvalidRouteGap(i);
+        }
+        // Every executed intermediate token must exist: hop i-1 outputs path[2i].
+        for (uint256 i = 1; i < k; i++) {
+            if (path[2 * i] == address(0)) revert InvalidRouteToken(2 * i);
+        }
+        address delivered = path[2 * k];
+        if (delivered != tokenOut) revert InvalidRouteEnd(tokenOut, delivered);
+        // Swap params and pools must match the executed prefix: executed rows dispatch on a swap_type the
+        // router accepts (not 0, not 9), and rows and pools the router never reads are zero.
+        for (uint256 h = 0; h < 5; h++) {
+            if (h < k) {
+                uint256 swapType = swapParams[h][2];
+                if (swapType == 0 || swapType == 9) revert InvalidRouteSwapParams(h);
+            } else {
+                for (uint256 f = 0; f < 5; f++) {
+                    if (swapParams[h][f] != 0) revert InvalidRouteSwapParams(h);
+                }
+                if (pools[h] != address(0)) revert InvalidRoutePools(h);
             }
         }
-        require(lastToken == tokenOut, "CurveAMMAdapter: path must end at tokenOut");
 
         Route storage r = routes[tokenIn][tokenOut];
         r.path = path;

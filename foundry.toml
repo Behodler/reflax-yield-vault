@@ -7,4 +7,7 @@ remappings = [
     "pauser/=lib/mutable/pauser/src/",
 ]
 
+# Read-only access so tests can assert the canonical route catalog (story 052)
+fs_permissions = [{ access = "read", path = "./AMMRoutes.json" }]
+
 # See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md#all-options

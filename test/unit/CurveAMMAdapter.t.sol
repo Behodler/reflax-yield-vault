@@ -131,14 +131,16 @@ contract CurveAMMAdapterTest is Test {
         adapter.setRoute(address(tokenA), address(tokenB), path, params, _emptyPools());
     }
 
-    function testSetRouteRevertsWhenLastNonZeroDoesNotMatchTokenOut() public {
+    function testSetRouteRevertsWhenDeliveredTokenDoesNotMatchTokenOut() public {
         address[11] memory path;
         path[0] = address(tokenA);
         path[1] = address(0xAABB);
         path[2] = address(tokenMid); // wrong end
         uint256[5][5] memory params = _makeSimpleSwapParams(0, 1);
 
-        vm.expectRevert("CurveAMMAdapter: path must end at tokenOut");
+        vm.expectRevert(
+            abi.encodeWithSelector(CurveAMMAdapter.InvalidRouteEnd.selector, address(tokenB), address(tokenMid))
+        );
         vm.prank(owner);
         adapter.setRoute(address(tokenA), address(tokenB), path, params, _emptyPools());
     }
